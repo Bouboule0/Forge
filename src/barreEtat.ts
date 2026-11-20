@@ -36,8 +36,8 @@ export class BarreEtat implements vscode.Disposable {
       return;
     }
     this.element.text = aRevoir > 0 ? `🌱 ${aRevoir} à revoir` : '🌳 À jour';
-    this.element.tooltip = `Forge : ${aRevoir} notion(s) à revoir sur ${total}`;
-    this.element.command = 'forge.notionsARevoir';
+    this.element.tooltip = `Forge : ${aRevoir} notion(s) à revoir sur ${total} — clique pour réviser`;
+    this.element.command = 'forge.reviser';
   }
 
   /** Actualise après une rafale de modifications (import de 50 notes = 1 seule actualisation). */

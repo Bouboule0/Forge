@@ -2,7 +2,7 @@
   "name": "forge",
   "displayName": "Forge — Révision par l'action",
   "description": "Transforme tes Prosits et CER (CESI) en second cerveau Obsidian et t'aide à réviser en codant.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "bouboule0",
   "license": "MIT",
   "repository": {
@@ -22,6 +22,12 @@
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
+      {
+        "command": "forge.reviser",
+        "title": "Réviser",
+        "category": "Forge",
+        "icon": "$(mortar-board)"
+      },
       {
         "command": "forge.verifierInstallation",
         "title": "Vérifier l'installation",
@@ -69,11 +75,21 @@
           "command": "forge.exporterWord",
           "when": "resourceExtname == .md",
           "group": "forge"
+        },
+        {
+          "command": "forge.reviser",
+          "when": "resourceExtname == .md",
+          "group": "forge"
         }
       ],
       "editor/title/context": [
         {
           "command": "forge.exporterWord",
+          "when": "resourceExtname == .md",
+          "group": "forge"
+        },
+        {
+          "command": "forge.reviser",
           "when": "resourceExtname == .md",
           "group": "forge"
         }
@@ -106,9 +122,21 @@
           "type": "string",
           "default": "",
           "markdownDescription": "(Optionnel) Chemin d'un fichier Word dont l'export reprend les styles (polices, couleurs). Tu peux mettre l'un de tes CER .docx."
+        },
+        "forge.suggestionOuverture": {
+          "type": "boolean",
+          "default": true,
+          "description": "Proposer une séance de révision à l'ouverture de VS Code (au plus une fois par jour) quand des notions sont à revoir."
         }
       }
-    }
+    },
+    "keybindings": [
+      {
+        "command": "forge.reviser",
+        "key": "ctrl+alt+r",
+        "mac": "cmd+alt+r"
+      }
+    ]
   },
   "scripts": {
     "build": "node esbuild.mjs",
@@ -122,6 +150,7 @@
   "dependencies": {
     "gray-matter": "^4.0.3",
     "mammoth": "^1.13.0",
+    "marked": "^18.2.1",
     "node-html-parser": "^9.0.7",
     "turndown": "^7.2.0",
     "turndown-plugin-gfm": "^1.0.2"

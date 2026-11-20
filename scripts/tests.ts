@@ -128,3 +128,115 @@ test('export Word : tableau des mots-clés et validation des pistes', () => {
   assert.doesNotMatch(markdown, /\[\[|forge:/);
   assert.equal(lireNote(path.join(coffre, 'Prosits', 'P04 - Titre 4.md')).data.type, 'prosit');
 });
+
+// --------------------------------------------------------------------------
+// Phase 2 : répétition espacée, exercices, séance
+
+import { ajouterJours, appliquerResultat, plafond, type EtatRevision } from '../src/core/repetition';
+import { corriger, genererQcmNotion, genererTrou, masquerNom, reponseCorrecte } from '../src/core/exercices';
+import { lireNotionsRevision, serieDeJours } from '../src/core/notionsRevision';
+import { Seance } from '../src/core/seance';
+
+const etat = (niveau: number, aavCible = 2, preuves = {}): EtatRevision => ({ niveau, prochaine: null, derniere: null, aavCible, reussites: 0, echecs: 0, preuves });
+
+/** Hasard reproductible pour les tests. */
+function hasardFixe(graine = 42) {
+  let x = graine;
+  return () => ((x = (x * 1103515245 + 12345) % 2 ** 31) / 2 ** 31);
+}
+
+test('répétition espacée : montée, échec, intervalles', () => {
+  const r1 = appliquerResultat(etat(0), 'reussite', 'trou', '2026-11-20');
+  assert.equal(r1.etat.niveau, 1);
+  assert.equal(r1.etat.prochaine, '2026-11-21');
+  assert.equal(appliquerResultat(etat(2), 'reussite', 'qcm', '2026-11-20').etat.prochaine, '2026-11-27');
+  assert.equal(appliquerResultat(etat(4), 'echec', null, '2026-11-20').etat.niveau, 2);
+  assert.equal(appliquerResultat(etat(1), 'echec', null, '2026-11-20').etat.niveau, 0);
+  assert.equal(appliquerResultat(etat(3), 'moyen', null, '2026-11-20').etat.niveau, 3);
+  assert.equal(ajouterJours('2026-12-31', 1), '2027-01-01');
+});
+
+test('plafond : les AAV exigent les bons types d’exercices', () => {
+  const bloque = appliquerResultat(etat(4, 3), 'reussite', 'qcm', '2026-11-20');
+  assert.equal(bloque.etat.niveau, 4);
+  assert.match(bloque.changement.bloque ?? '', /explication.*code/);
+  assert.equal(plafond(etat(4, 2, { explication: 1 })).max, 6);
+  assert.equal(plafond(etat(4, 3, { explication: 1, code: 1 })).max, 4);
+  assert.equal(plafond(etat(4, 5, { explication: 1, code: 2, long: 1, papier: 1 })).max, 6);
+});
+
+test('correction tolérante des textes à trous', () => {
+  assert.ok(reponseCorrecte('Templates', 'templates'));
+  assert.ok(reponseCorrecte('template', 'templates'));
+  assert.ok(reponseCorrecte('desordones', 'désordonnés'));
+  assert.ok(reponseCorrecte('heritage', 'héritage'));
+  assert.ok(!reponseCorrecte('polymorphisme', 'encapsulation'));
+  assert.ok(!reponseCorrecte('', 'vptr'));
+});
+
+test('masquage du nom de la notion dans sa définition', () => {
+  const n = { nom: 'Opérateur XOR', titre: 'Opérateur XOR', aliases: [] };
+  assert.equal(masquerNom('Opérateur logique : le XOR renvoie 1.', n), '▢▢▢ logique : le ▢▢▢ renvoie 1.');
+});
+
+function coffreAvecNotions(): string {
+  const coffre = coffreTemporaire();
+  const defs: Array<[string, string]> = [
+    ['Polymorphisme', 'Capacité d’une même interface à produire des comportements différents. Il peut être statique (surcharge, templates) ou dynamique.'],
+    ['Template', 'Mécanisme du C++ permettant d’écrire une classe paramétrée par un ou plusieurs types, instanciée par le compilateur.'],
+    ['Surcharge', 'Possibilité de définir plusieurs fonctions portant le même nom mais avec des signatures différentes.'],
+    ['Encapsulation', 'Principe consistant à regrouper les données et les méthodes dans une classe en masquant les détails internes (attributs private).'],
+    ['Pointeurs', 'Variables qui contiennent l’adresse mémoire d’une autre variable ou d’un objet, utilisées avec new et delete.'],
+  ];
+  ecrirePlan(construirePlan(coffre, [analyse(4, defs)], 'POO'));
+  return coffre;
+}
+
+test('génération des exercices à partir des notes', () => {
+  const coffre = coffreAvecNotions();
+  const notions = lireNotionsRevision(coffre);
+  const poly = notions.find((n) => n.nom === 'Polymorphisme')!;
+  assert.equal(poly.definitions.length, 1);
+  const trou = genererTrou(poly, notions, hasardFixe())!;
+  assert.ok(trou.attendu && trou.enonce.includes('___'));
+  assert.ok(!/polymorphisme/i.test(trou.attendu!), 'le trou ne cache pas le nom de la notion');
+  assert.equal(corriger(trou, { type: 'texte', valeur: trou.attendu! }).resultat, 'reussite');
+  const qcm = genererQcmNotion(poly, notions, hasardFixe())!;
+  assert.equal(qcm.options!.length, 4);
+  assert.equal(qcm.options![qcm.bonneOption!], 'Polymorphisme');
+  assert.equal(corriger(qcm, { type: 'option', index: (qcm.bonneOption! + 1) % 4 }).resultat, 'echec');
+});
+
+test('séance : la réussite fait pousser et est enregistrée, l’échec revient', () => {
+  const coffre = coffreAvecNotions();
+  const seance = new Seance(coffre, { rapide: true, entrainement: false, perimetre: { type: 'tout' } }, hasardFixe(), '2026-11-20');
+  assert.equal(seance.aRevoir().length, 5);
+  const premier = seance.suivant()!;
+  const bonne = premier.exercice.options ? { type: 'option' as const, index: premier.exercice.bonneOption! } : { type: 'texte' as const, valeur: premier.exercice.attendu! };
+  const r = seance.repondre(bonne);
+  assert.equal(r.changement?.apres, 1);
+  assert.match(fs.readFileSync(premier.notion.chemin, 'utf8'), /niveau: 1[\s\S]*maitrise\/1/);
+
+  const second = seance.suivant()!;
+  seance.repondre({ type: 'jeNeSaisPas' });
+  const restants = seance.restants();
+  assert.equal(restants, 4, 'la notion ratée est remise dans la file');
+  // Revue une 2e fois dans la journée : entraînement, plus de changement de niveau
+  let x = seance.suivant();
+  while (x && x.notion.chemin !== second.notion.chemin) {
+    seance.repondre({ type: 'jeNeSaisPas' });
+    x = seance.suivant();
+  }
+  assert.ok(x);
+  assert.equal(seance.repondre({ type: 'jeNeSaisPas' }).compte, false);
+  const bilan = seance.terminer();
+  assert.equal(bilan.montees.length, 1);
+  assert.equal(bilan.serie, 1);
+});
+
+test('série de jours', () => {
+  const e = (d: string) => ({ date: `${d}T10:00:00`, notion: 'x', type: 'trou', resultat: 'reussite' as const, compte: true });
+  assert.equal(serieDeJours([e('2026-11-18'), e('2026-11-19'), e('2026-11-20')], '2026-11-20'), 3);
+  assert.equal(serieDeJours([e('2026-11-18'), e('2026-11-19')], '2026-11-20'), 2);
+  assert.equal(serieDeJours([e('2026-11-17')], '2026-11-20'), 0);
+});

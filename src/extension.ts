@@ -13,6 +13,7 @@ import { afficherEcranImport } from './vues/ecranImport';
 import { afficherNotionsARevoir, BarreEtat } from './barreEtat';
 import { choisirCoffre, coffreActuel, commandePandoc, compilateur, modeleWord, moduleParDefaut, obtenirCoffre } from './config';
 import { cheminPour, executer, passeParWsl } from './systeme';
+import { lancerRevision, suggererRevision } from './revision';
 
 let journal: vscode.OutputChannel;
 
@@ -46,12 +47,16 @@ export function activate(context: vscode.ExtensionContext): void {
   commande('forge.exporterWord', exporterWord);
   commande('forge.ouvrirCoffre', ouvrirCoffre);
   commande('forge.notionsARevoir', afficherNotionsARevoir);
+  commande('forge.reviser', (uri?: vscode.Uri) => lancerRevision(uri, () => barre.actualiser()));
 
   context.subscriptions.push(
     barre,
     journal,
     vscode.workspace.onDidChangeConfiguration((e) => e.affectsConfiguration('forge') && barre.actualiser()),
   );
+
+  // Une révision est proposée au démarrage (au plus une fois par jour)
+  setTimeout(() => suggererRevision(context), 4000);
 
   // Premier lancement : petit message d'accueil
   if (!context.globalState.get('forge.accueilVu') && !coffreActuel()) {
