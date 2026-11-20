@@ -1,0 +1,4 @@
+*.vsix
+.essai/
+dist/
+node_modules/
