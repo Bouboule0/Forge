@@ -1,0 +1,137 @@
+{
+  "name": "forge",
+  "displayName": "Forge — Révision par l'action",
+  "description": "Transforme tes Prosits et CER (CESI) en second cerveau Obsidian et t'aide à réviser en codant.",
+  "version": "0.1.0",
+  "publisher": "bouboule0",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Bouboule0/Forge"
+  },
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Education",
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "forge.verifierInstallation",
+        "title": "Vérifier l'installation",
+        "category": "Forge"
+      },
+      {
+        "command": "forge.choisirCoffre",
+        "title": "Créer / choisir le coffre Obsidian",
+        "category": "Forge"
+      },
+      {
+        "command": "forge.importer",
+        "title": "Importer des CER / Prosits (.docx)",
+        "category": "Forge"
+      },
+      {
+        "command": "forge.nouveauProsit",
+        "title": "Nouveau Prosit",
+        "category": "Forge"
+      },
+      {
+        "command": "forge.exporterWord",
+        "title": "Exporter le CER en Word",
+        "category": "Forge"
+      },
+      {
+        "command": "forge.ouvrirCoffre",
+        "title": "Ouvrir le coffre dans VS Code",
+        "category": "Forge"
+      },
+      {
+        "command": "forge.notionsARevoir",
+        "title": "Notions à revoir",
+        "category": "Forge"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "forge.importer",
+          "when": "resourceExtname == .docx",
+          "group": "forge"
+        },
+        {
+          "command": "forge.exporterWord",
+          "when": "resourceExtname == .md",
+          "group": "forge"
+        }
+      ],
+      "editor/title/context": [
+        {
+          "command": "forge.exporterWord",
+          "when": "resourceExtname == .md",
+          "group": "forge"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Forge",
+      "properties": {
+        "forge.cheminCoffre": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Dossier du coffre Obsidian (second cerveau). Utilise la commande **Forge : Créer / choisir le coffre Obsidian** pour le remplir automatiquement."
+        },
+        "forge.compilateur": {
+          "type": "string",
+          "default": "auto",
+          "markdownDescription": "Commande de compilation C++. `auto` = `wsl g++` sous Windows, `g++` ailleurs. Exemples : `wsl g++`, `g++`, `clang++`."
+        },
+        "forge.pandoc": {
+          "type": "string",
+          "default": "pandoc",
+          "markdownDescription": "Commande pandoc utilisée pour l'export Word. Sous Windows, `wsl pandoc` fonctionne aussi si pandoc est installé dans WSL."
+        },
+        "forge.moduleParDefaut": {
+          "type": "string",
+          "default": "Programmation orientée objet",
+          "description": "Module proposé à l'import quand le CER n'en indique pas."
+        },
+        "forge.modeleWord": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "(Optionnel) Chemin d'un fichier Word dont l'export reprend les styles (polices, couleurs). Tu peux mettre l'un de tes CER .docx."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "essai-import": "node esbuild.mjs --script scripts/essai-import.ts && node dist/scripts/essai-import.js",
+    "test": "node esbuild.mjs --script scripts/tests.ts && node --test dist/scripts/tests.js",
+    "vscode:prepublish": "npm run typecheck && npm run build",
+    "package": "vsce package"
+  },
+  "dependencies": {
+    "gray-matter": "^4.0.3",
+    "mammoth": "^1.13.0",
+    "node-html-parser": "^9.0.7",
+    "turndown": "^7.2.0",
+    "turndown-plugin-gfm": "^1.0.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/turndown": "^5.0.5",
+    "@types/vscode": "^1.90.0",
+    "@vscode/vsce": "^3.0.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.6.0"
+  }
+}
