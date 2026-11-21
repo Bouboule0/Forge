@@ -12,8 +12,8 @@ Le plan complet est dans [`docs/PLAN.md`](docs/PLAN.md).
 |---|---|---|
 | 0. Installation | Squelette, vérification de `wsl g++`, « Hello Forge » | ✅ |
 | 1. Import | Import des CER (.docx), écran de validation, nouveau Prosit, export Word | ✅ |
-| 2. Révision hors ligne | Texte à trous, QCM, répétition espacée | ⏳ |
-| 3. IA (DeepSeek) | Vrai ou faux sur les pistes, explication libre | ⏳ |
+| 2. Révision hors ligne | Texte à trous, QCM, répétition espacée, séances | ✅ |
+| 3. IA (DeepSeek) | Relecture des définitions ✅ · vrai ou faux sur les pistes, explication libre ⏳ | 🚧 |
 | 4. Code | Exercices C++ compilés et testés, mode papier | ⏳ |
 | 5. Ferme | Ferme pixel-art que tu aménages toi-même | ⏳ |
 | 6. Finitions | Mode examen (CCTL, étude de cas), statistiques, `.vsix` | ⏳ |
@@ -131,16 +131,67 @@ Pour synchroniser automatiquement, installe dans Obsidian le plugin communautair
 
 ---
 
+## 🌱 Réviser
+
+Lance une séance avec **Ctrl+Alt+R**, un clic sur `🌱 N à revoir` dans la barre d'état, ou `Ctrl+Shift+P` → **Forge : Réviser**.
+Un clic droit sur une note Prosit ou Notion → **Forge : Réviser** révise seulement ce Prosit ou cette notion.
+
+| Séance | Contenu |
+|---|---|
+| ⚡ Rapide | Textes à trous et QCM, idéal entre deux cours |
+| 🧠 Complète | En plus : expliquer avec tes mots |
+| 🏋️ Entraînement libre | Tout le périmètre, sans changer le calendrier (pratique avant un CCTL) |
+
+La séance dure **aussi longtemps que tu veux** (bouton « Terminer la séance »). Raccourcis : `Entrée` valider / suivant, `1`–`4` choisir une réponse, `Échap` je ne sais pas.
+
+### Comment poussent tes plantes
+
+| Niveau | Stade | Prochaine révision après une réussite |
+|---|---|---|
+| 0 | 🌰 graine | — |
+| 1 | 🌱 germe | 1 jour |
+| 2 | 🌿 pousse | 3 jours |
+| 3 | 🪴 jeune plant | 7 jours |
+| 4 | 🌳 plant adulte | 14 jours |
+| 5 | 🌸 en fleurs | 30 jours |
+| 6 | 🍎 récoltable | 60 jours |
+
+- Un **échec** fait perdre un niveau (deux à partir de 🌳), et la notion revient le lendemain. Elle revient aussi plus tard dans la même séance.
+- **Seule la première réponse du jour** compte ; les suivantes sont de l'entraînement.
+- Pour dépasser 🌳, il faut des exercices qui prouvent l'AAV : une explication corrigée par l'IA (phase 3), du code pour un AAV [3] (phase 4)…
+
+## 🤖 Définitions générées par IA
+
+Tes CER contiennent des définitions générées par IA. Par défaut, Forge les **accepte d'office** (réglage `forge.definitionsIA` = `accepter`) et les fait **relire par DeepSeek** :
+
+- une définition **juste** est marquée comme relue (`revue_ia: ok`) ;
+- une définition **fausse ou imprécise** est **remplacée** par une version corrigée. L'ancienne reste visible dans la note (encadré repliable « Définition d'origine », avec la raison), et un réimport ne la remet pas ;
+- une notion **sans définition** (par exemple un objectif d'AAV comme « Principe de substitution de Liskov ») reçoit une définition écrite par l'IA ;
+- un rapport est créé dans `Rapports/Relecture IA <date>.md`.
+
+Pour l'activer :
+1. Crée une clé API sur https://platform.deepseek.com/api_keys.
+2. `Ctrl+Shift+P` → **Forge : Configurer la clé DeepSeek**. La clé est stockée de façon sécurisée par VS Code, jamais dans un fichier.
+3. `Ctrl+Shift+P` → **Forge : Faire relire les définitions par l'IA**.
+
+Ensuite, chaque import lance automatiquement la relecture des nouvelles définitions (réglage `forge.relectureIAApresImport`). Tu peux toujours modifier une définition à la main.
+
+> Tu préfères tout valider toi-même ? Mets `forge.definitionsIA` sur `verifier` : les séances complètes te proposeront alors « Vérifie la définition » pour chaque définition générée par IA.
+
 ## 🧭 Les commandes
 
 | Commande | Ce qu'elle fait |
 |---|---|
+| Forge : Réviser | Lance une séance (Ctrl+Alt+R) |
 | Forge : Vérifier l'installation | Teste `wsl g++` (compile et lance « Hello Forge »), pandoc et git |
 | Forge : Créer / choisir le coffre Obsidian | Crée les dossiers et règle les couleurs du graphe |
 | Forge : Importer des CER / Prosits (.docx) | Lit tes Word et crée les notes, après l'écran de validation |
 | Forge : Nouveau Prosit | Crée un CER vierge en Markdown, avec toutes les sections CESI |
 | Forge : Exporter le CER en Word | Génère un `.docx` au format CER, dans `Exports/` |
-| Forge : Notions à revoir | Liste les notions à réviser (aussi via `🌱 N à revoir` dans la barre d'état) |
+| Forge : Notions à revoir | Liste les notions à réviser, pour les relire |
+| Forge : Configurer la clé DeepSeek | Enregistre (ou supprime) ta clé API DeepSeek |
+| Forge : Faire relire les définitions par l'IA | Relit les définitions pas encore relues ; corrige les fausses, écrit les manquantes |
+| Forge : Faire relire toutes les définitions par l'IA | Pareil, même celles déjà relues |
 | Forge : Ouvrir le coffre dans VS Code | Ouvre le coffre dans une nouvelle fenêtre |
 
 ### Réglages (Ctrl+, puis cherche « forge »)
@@ -152,6 +203,10 @@ Pour synchroniser automatiquement, installe dans Obsidian le plugin communautair
 | `forge.pandoc` | `pandoc` | `wsl pandoc` marche aussi |
 | `forge.modeleWord` | (vide) | Un de tes CER .docx, pour que l'export reprenne ses styles |
 | `forge.moduleParDefaut` | Programmation orientée objet | Module proposé à l'import |
+| `forge.suggestionOuverture` | `true` | Proposer une séance au démarrage (une fois par jour) |
+| `forge.definitionsIA` | `accepter` | `accepter` : définitions IA acceptées puis relues par DeepSeek · `verifier` : à valider toi-même |
+| `forge.relectureIAApresImport` | `true` | Relire automatiquement les nouvelles définitions après un import |
+| `forge.deepseek.modele` | `deepseek-chat` | Modèle DeepSeek |
 
 ---
 
@@ -191,7 +246,7 @@ npm run essai-import -- ./coffre-test chemin/vers/CER.docx
 
 | Dossier | Contenu |
 |---|---|
-| `src/core/` | Logique sans VS Code : lecture des .docx, plan d'import, écriture du coffre, export Word |
-| `src/vues/` | Webviews (écran de validation) |
+| `src/core/` | Logique sans VS Code : import, écriture du coffre, export Word, répétition espacée, exercices, séance |
+| `src/vues/` | Webviews (écran de validation, écran de séance) |
 | `src/extension.ts` | Commandes VS Code |
 | `scripts/` | Tests et essais en ligne de commande |

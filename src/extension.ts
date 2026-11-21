@@ -11,13 +11,35 @@ import { construireCer } from './core/exportWord';
 import { cheminDossier, DOSSIERS } from './core/coffre';
 import { afficherEcranImport } from './vues/ecranImport';
 import { afficherNotionsARevoir, BarreEtat } from './barreEtat';
-import { choisirCoffre, coffreActuel, commandePandoc, compilateur, modeleWord, moduleParDefaut, obtenirCoffre } from './config';
+import { reglages as reglagesForge, choisirCoffre, coffreActuel, commandePandoc, compilateur, modeleWord, moduleParDefaut, obtenirCoffre } from './config';
 import { cheminPour, executer, passeParWsl } from './systeme';
+import { lancerRevision, suggererRevision } from './revision';
+import { accepterDefinitionsIA, configurerCle, lancerRelecture } from './ia';
 
 let journal: vscode.OutputChannel;
+let contexte: vscode.ExtensionContext | undefined;
+
+declare const __VERSION_BUILD__: string;
+
+/** Le code compilé ne correspond pas au package.json : il faut relancer npm install + build. */
+function verifierBuild(context: vscode.ExtensionContext): void {
+  const attendue = String(context.extension?.packageJSON?.version ?? '');
+  const compilee = typeof __VERSION_BUILD__ === 'string' ? __VERSION_BUILD__ : '?';
+  if (attendue && compilee !== attendue) {
+    vscode.window.showWarningMessage(
+      `Forge n'a pas été reconstruite après la mise à jour (code ${compilee}, version ${attendue}). Dans le terminal du projet : npm install, puis arrête et relance le débogage (F5).`,
+    );
+  }
+}
 
 export function activate(context: vscode.ExtensionContext): void {
+  contexte = context;
   journal = vscode.window.createOutputChannel('Forge');
+  try {
+    verifierBuild(context);
+  } catch {
+    // Une simple vérification ne doit jamais empêcher l'extension de démarrer
+  }
   const barre = new BarreEtat();
 
   const commande = (id: string, action: (...args: any[]) => unknown) =>
@@ -39,19 +61,37 @@ export function activate(context: vscode.ExtensionContext): void {
     barre.actualiser();
   });
   commande('forge.importer', async (uri?: vscode.Uri, uris?: vscode.Uri[]) => {
-    await importer(uri, uris);
+    const importe = await importer(uri, uris);
     barre.actualiser();
+    // Les nouvelles définitions sont relues par l'IA (si une clé DeepSeek est enregistrée)
+    if (importe && reglagesForge().get<boolean>('relectureIAApresImport', true)) {
+      await lancerRelecture(context, { demander: false, journal });
+    }
+  });
+  commande('forge.configurerCleDeepSeek', () => configurerCle(context));
+  commande('forge.relireDefinitions', () => lancerRelecture(context, { demander: true, journal }));
+  commande('forge.relireToutesDefinitions', async () => {
+    const ok = await vscode.window.showWarningMessage(
+      "Faire relire TOUTES les définitions par l'IA, même celles déjà relues ou écrites par toi ?",
+      { modal: true },
+      'Oui, tout relire',
+    );
+    if (ok) await lancerRelecture(context, { demander: true, toutes: true, journal });
   });
   commande('forge.nouveauProsit', nouveauProsit);
   commande('forge.exporterWord', exporterWord);
   commande('forge.ouvrirCoffre', ouvrirCoffre);
   commande('forge.notionsARevoir', afficherNotionsARevoir);
+  commande('forge.reviser', (uri?: vscode.Uri) => lancerRevision(uri, () => barre.actualiser()));
 
   context.subscriptions.push(
     barre,
     journal,
     vscode.workspace.onDidChangeConfiguration((e) => e.affectsConfiguration('forge') && barre.actualiser()),
   );
+
+  // Une révision est proposée au démarrage (au plus une fois par jour)
+  setTimeout(() => suggererRevision(context), 4000);
 
   // Premier lancement : petit message d'accueil
   if (!context.globalState.get('forge.accueilVu') && !coffreActuel()) {
@@ -114,7 +154,8 @@ async function verifierInstallation(): Promise<void> {
     const vGit = await executer('git', ['--version']);
     ligne(vGit.code === 0 ? true : null, vGit.code === 0 ? `git : ${vGit.sortie.trim()}` : 'git absent (utile pour synchroniser le coffre avec GitHub)');
 
-    ligne(null, 'Clé DeepSeek : sera demandée à la phase 3 (exercices avec IA).');
+    const cle = await contexte?.secrets.get('forge.deepseek.cle');
+    ligne(cle ? true : null, cle ? 'Clé DeepSeek : enregistrée' : 'Clé DeepSeek : absente (commande « Forge : Configurer la clé DeepSeek »), utile pour la relecture des définitions');
   });
   journal.appendLine('\nTerminé. Si tout est ✅, tu peux importer tes CER : « Forge : Importer des CER / Prosits (.docx) ».');
 }
@@ -122,9 +163,9 @@ async function verifierInstallation(): Promise<void> {
 // --------------------------------------------------------------------------
 // Import des CER
 
-async function importer(uri?: vscode.Uri, uris?: vscode.Uri[]): Promise<void> {
+async function importer(uri?: vscode.Uri, uris?: vscode.Uri[]): Promise<boolean> {
   const coffre = await obtenirCoffre();
-  if (!coffre) return;
+  if (!coffre) return false;
 
   let fichiers = (uris && uris.length ? uris : uri ? [uri] : []).filter((u) => u.fsPath.toLowerCase().endsWith('.docx'));
   if (fichiers.length === 0) {
@@ -136,7 +177,7 @@ async function importer(uri?: vscode.Uri, uris?: vscode.Uri[]): Promise<void> {
         title: 'Choisis un ou plusieurs CER / Prosits Aller (.docx)',
       })) ?? [];
   }
-  if (fichiers.length === 0) return;
+  if (fichiers.length === 0) return false;
 
   const analyses: CerAnalyse[] = [];
   await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Forge : lecture des documents' }, async (progression) => {
@@ -150,13 +191,13 @@ async function importer(uri?: vscode.Uri, uris?: vscode.Uri[]): Promise<void> {
       }
     }
   });
-  if (analyses.length === 0) return;
+  if (analyses.length === 0) return false;
 
   const plan = construirePlan(coffre, analyses, moduleParDefaut());
   const valide = await afficherEcranImport(plan);
-  if (!valide) return;
+  if (!valide) return false;
 
-  const resultat = ecrirePlan(valide);
+  const resultat = ecrirePlan(valide, { accepterDefinitionsIA: accepterDefinitionsIA() });
   journal.appendLine(`[import] ${JSON.stringify(resultat, null, 2)}`);
 
   const morceaux = [
@@ -165,13 +206,16 @@ async function importer(uri?: vscode.Uri, uris?: vscode.Uri[]): Promise<void> {
     resultat.notionsMisesAJour.length ? `${resultat.notionsMisesAJour.length} mise(s) à jour` : '',
     resultat.prositsIgnores.length ? `${resultat.prositsIgnores.length} Prosit(s) déjà présent(s) gardé(s)` : '',
   ].filter(Boolean);
-  const choix = await vscode.window.showInformationMessage(`🌱 Import terminé : ${morceaux.join(', ')}.`, 'Ouvrir dans Obsidian', 'Ouvrir le Prosit');
   const premier = resultat.prositsCrees[0] ?? resultat.prositsIgnores[0];
   const cheminPremier = premier ? path.join(cheminDossier(coffre, 'prosits'), `${premier}.md`) : undefined;
-  if (choix === 'Ouvrir le Prosit' && cheminPremier) await vscode.window.showTextDocument(vscode.Uri.file(cheminPremier));
-  if (choix === 'Ouvrir dans Obsidian') {
-    await vscode.env.openExternal(vscode.Uri.parse(`obsidian://open?path=${encodeURIComponent(cheminPremier ?? coffre)}`));
-  }
+  // Pas d'attente ici : la relecture IA peut démarrer pendant que le message est affiché
+  vscode.window.showInformationMessage(`🌱 Import terminé : ${morceaux.join(', ')}.`, 'Ouvrir dans Obsidian', 'Ouvrir le Prosit').then(async (choix) => {
+    if (choix === 'Ouvrir le Prosit' && cheminPremier) await vscode.window.showTextDocument(vscode.Uri.file(cheminPremier));
+    if (choix === 'Ouvrir dans Obsidian') {
+      await vscode.env.openExternal(vscode.Uri.parse(`obsidian://open?path=${encodeURIComponent(cheminPremier ?? coffre)}`));
+    }
+  });
+  return true;
 }
 
 // --------------------------------------------------------------------------

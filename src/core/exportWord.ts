@@ -23,7 +23,8 @@ function definitionNotion(coffre: string, nom: string, nomProsit: string): strin
   const chemin = path.join(cheminDossier(coffre, 'notions'), `${nomFichierSur(nom)}.md`);
   if (!fs.existsSync(chemin)) return '';
   const { content } = lireNote(chemin);
-  const defs = lireBloc(content, 'definitions') ?? '';
+  // « **Corrigée par l'IA** (date) » n'est qu'une étiquette
+  const defs = (lireBloc(content, 'definitions') ?? '').replace(/^\s*\*\*(Corrigée|Écrite) par l'IA\*\*[^\n]*\n+/, '');
   const morceaux = defs.split(/\*\*D'après \[\[([^\]]+)\]\]\*\*/);
   // morceaux = [avant, prosit1, texte1, prosit2, texte2...]
   let choisie = morceaux.length > 2 ? morceaux[2] : defs;
