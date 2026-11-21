@@ -163,7 +163,12 @@ export interface ResultatEcriture {
   modules: string[];
 }
 
-export function ecrirePlan(plan: PlanImport): ResultatEcriture {
+export interface OptionsEcriture {
+  /** Les définitions générées par IA sont acceptées d'office (relues ensuite par l'IA). */
+  accepterDefinitionsIA: boolean;
+}
+
+export function ecrirePlan(plan: PlanImport, options: OptionsEcriture = { accepterDefinitionsIA: true }): ResultatEcriture {
   const { coffre } = plan;
   initialiserCoffre(coffre);
   const resultat: ResultatEcriture = { prositsCrees: [], prositsIgnores: [], notionsCreees: [], notionsMisesAJour: [], modules: [] };
@@ -233,7 +238,12 @@ export function ecrirePlan(plan: PlanImport): ResultatEcriture {
       if (!data.module && modules[0]) data.module = lien(nomFichierSur(modules[0]));
       let texte = content;
       const blocDefinitions = lireBloc(texte, 'definitions') ?? '';
-      const ajouts = definitions.filter((d) => !blocDefinitions.includes(d.entete)).map((d) => `${d.entete}\n\n${d.texte}`);
+      // Une définition remplacée par l'IA (car fausse) n'est pas remise par un réimport
+      const remplacees = (Array.isArray(data.definitions_remplacees) ? data.definitions_remplacees.map(String) : []).join(' ');
+      const ajouts = definitions
+        .filter((d) => !blocDefinitions.includes(d.entete) && !remplacees.includes(d.entete.replace(/^\*\*D'après /, '').replace(/\*\*$/, '')))
+        .map((d) => `${d.entete}\n\n${d.texte}`);
+      if (ajouts.length && data.revue_ia) data.revue_ia = 'a_faire'; // nouvelle définition à faire relire
       if (ajouts.length) {
         const base = blocDefinitions.trim().startsWith('_') ? '' : blocDefinitions.trim();
         texte = remplacerBloc(texte, 'definitions', [base, ...ajouts].filter(Boolean).join('\n\n'));
@@ -249,13 +259,14 @@ export function ecrirePlan(plan: PlanImport): ResultatEcriture {
         module: modules[0] ? lien(nomFichierSur(modules[0])) : '',
         prosits: prositsLies.map(lien),
         aav_cible: aavCible,
-        statut: n.genereeParIA || n.definitions.length === 0 ? 'a_verifier' : 'verifie',
+        statut: n.definitions.length === 0 || (n.genereeParIA && !options.accepterDefinitionsIA) ? 'a_verifier' : 'verifie',
+        revue_ia: n.genereeParIA || n.definitions.length === 0 ? 'a_faire' : undefined,
         niveau: 0,
         prochaine_revision: date,
         derniere_revision: '',
         tags: ['forge/notion', 'maitrise/0'],
       };
-      ecrireNote(chemin, nettoyer(donnees), noteNotion(n, definitions, lignesAav, liens));
+      ecrireNote(chemin, nettoyer(donnees), noteNotion(n, definitions, lignesAav, liens, options.accepterDefinitionsIA));
       resultat.notionsCreees.push(nom);
     }
   });
@@ -335,6 +346,19 @@ function notionsLiees(n: NotionCandidate, toutes: NotionCandidate[], noms: strin
 }
 
 // --------------------------------------------------------------------------
+// Avertissement « définition générée par IA »
+
+const AVERTISSEMENT_A_VERIFIER =
+  '> [!warning] Définition générée par IA — à vérifier\n> Relis-la, corrige-la si besoin, puis passe `statut` à `verifie` dans l\'en-tête.\n\n';
+const AVERTISSEMENT_ACCEPTEE =
+  "> [!info] Définition générée par IA\n> Acceptée d'office : Forge la fait relire par l'IA, qui la corrige si elle est fausse. Tu peux toujours la modifier.\n\n";
+
+/** Retire l'encadré d'avertissement (définition vérifiée, ou relue par l'IA). */
+export function retirerAvertissementIA(content: string): string {
+  return content.replace(/> \[!(warning|info)\] Définition générée par IA[^\n]*\n(> [^\n]*\n)*\n?/, '');
+}
+
+// --------------------------------------------------------------------------
 // Modèles de notes
 
 function section(titre: string, contenu: string, niveau = 3): string {
@@ -390,10 +414,13 @@ function noteNotion(
   definitions: Array<{ entete: string; texte: string }>,
   lignesAav: string[],
   liens: string[],
+  accepter = true,
 ): string {
-  const avertissement = n.genereeParIA
-    ? '> [!warning] Définition générée par IA — à vérifier\n> Relis-la, corrige-la si besoin, puis passe `statut` à `verifie` dans l\'en-tête.\n\n'
-    : '';
+  const avertissement = !n.genereeParIA || n.definitions.length === 0
+    ? ''
+    : accepter
+      ? AVERTISSEMENT_ACCEPTEE
+      : AVERTISSEMENT_A_VERIFIER;
   const defs = definitions.length ? definitions.map((d) => `${d.entete}\n\n${d.texte}`).join('\n\n') : '_Pas encore de définition. Écris-la avec tes mots !_';
   return [
     `# ${n.nom}`,

@@ -1,6 +1,8 @@
 # Journal des versions
 
 ## 0.2.0 — Phase 2 : révision hors ligne
+- Définitions générées par IA acceptées d'office (réglage `forge.definitionsIA`), relues par DeepSeek : les fausses sont corrigées (l'ancienne version reste visible), les manquantes sont écrites, un rapport est créé.
+- Clé DeepSeek stockée dans le coffre-fort de VS Code ; relecture automatique après chaque import.
 - Séances de révision de durée libre : rapide (trous + QCM), complète, ou entraînement libre.
 - Exercices générés depuis tes notes, sans IA : texte à trous (correction tolérante, indice), QCM « quelle notion ? » et « quelle définition ? », explication avec auto-évaluation, vérification des définitions générées par IA.
 - Répétition espacée sur 7 stades (🌰 → 🍎), plafond selon le niveau d'AAV.

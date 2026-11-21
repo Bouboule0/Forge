@@ -9,6 +9,7 @@ import { aujourdhui } from './core/texte';
 import { estARevoir } from './core/repetition';
 import { coffreActuel, obtenirCoffre, reglages } from './config';
 import { EcranSeance } from './vues/ecranSeance';
+import { accepterDefinitionsIA } from './ia';
 
 /** Périmètre déduit du fichier (clic droit sur une note Prosit ou Notion). */
 function perimetreDepuis(coffre: string, uri?: vscode.Uri): Perimetre {
@@ -38,7 +39,7 @@ export async function lancerRevision(uri: vscode.Uri | undefined, surFin: () => 
   if (aRevoir > 0) {
     choix.push(
       { label: '⚡ Séance rapide', description: 'textes à trous et QCM', detail: `${aRevoir} notion(s) à revoir — idéal entre deux cours`, rapide: true, entrainement: false },
-      { label: '🧠 Séance complète', description: '+ explications et vérification des définitions', detail: 'Pour une vraie session de révision', rapide: false, entrainement: false },
+      { label: '🧠 Séance complète', description: '+ expliquer avec tes mots', detail: 'Pour une vraie session de révision', rapide: false, entrainement: false },
     );
   }
   choix.push({
@@ -51,7 +52,7 @@ export async function lancerRevision(uri: vscode.Uri | undefined, surFin: () => 
 
   const choisi = await vscode.window.showQuickPick(choix, { title: `🌱 Réviser${cible}`, placeHolder: 'Quel type de séance ?' });
   if (!choisi) return;
-  EcranSeance.ouvrir(coffre, { rapide: choisi.rapide, entrainement: choisi.entrainement, perimetre }, surFin);
+  EcranSeance.ouvrir(coffre, { rapide: choisi.rapide, entrainement: choisi.entrainement, perimetre, verifierDefinitions: !accepterDefinitionsIA() }, surFin);
 }
 
 /** Propose une révision au démarrage de VS Code (une fois par jour au maximum). */

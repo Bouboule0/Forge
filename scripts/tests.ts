@@ -241,3 +241,111 @@ test('série de jours', () => {
   assert.equal(serieDeJours([e('2026-11-18'), e('2026-11-19')], '2026-11-20'), 2);
   assert.equal(serieDeJours([e('2026-11-17')], '2026-11-20'), 0);
 });
+
+// --------------------------------------------------------------------------
+// Relecture des définitions par l'IA (faux serveur DeepSeek local)
+
+import * as http from 'http';
+import { creerClientDeepSeek, ErreurIA, relireDefinitions } from '../src/core/relectureIA';
+
+async function fauxDeepSeek(repondre: (demande: any) => { statut?: number; corps: unknown }) {
+  const recues: any[] = [];
+  const serveur = http.createServer((req, res) => {
+    let brut = '';
+    req.on('data', (c) => (brut += c));
+    req.on('end', () => {
+      const demande = { ...JSON.parse(brut), autorisation: req.headers.authorization, chemin: req.url };
+      recues.push(demande);
+      const { statut = 200, corps } = repondre(demande);
+      res.writeHead(statut, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(corps));
+    });
+  });
+  await new Promise<void>((ok) => serveur.listen(0, '127.0.0.1', ok));
+  const port = (serveur.address() as { port: number }).port;
+  return { url: `http://127.0.0.1:${port}`, recues, fermer: () => serveur.close() };
+}
+
+const reponseIA = (resultats: unknown) => ({ choices: [{ message: { content: JSON.stringify({ resultats }) } }] });
+
+test('import : définitions IA acceptées d’office par défaut, ou à vérifier', () => {
+  const coffre = coffreTemporaire();
+  ecrirePlan(construirePlan(coffre, [analyse(4, [['Template', 'Déf']])], 'POO'));
+  const note = fs.readFileSync(path.join(coffre, 'Notions', 'Template.md'), 'utf8');
+  assert.match(note, /statut: verifie/);
+  assert.match(note, /revue_ia: a_faire/);
+  assert.match(note, /\[!info\] Définition générée par IA/);
+
+  const coffre2 = coffreTemporaire();
+  ecrirePlan(construirePlan(coffre2, [analyse(4, [['Template', 'Déf']])], 'POO'), { accepterDefinitionsIA: false });
+  assert.match(fs.readFileSync(path.join(coffre2, 'Notions', 'Template.md'), 'utf8'), /statut: a_verifier[\s\S]*\[!warning\]/);
+});
+
+test('relecture IA : valide, corrige (en gardant l’ancienne), écrit les manquantes', async () => {
+  const coffre = coffreTemporaire();
+  ecrirePlan(
+    construirePlan(coffre, [analyse(3, [['Héritage', 'Une classe fille hérite seulement des attributs publics.'], ['POO', 'Paradigme à base d’objets.']], [[2, 'Comprendre le principe de substitution de Liskov.']])], 'POO'),
+  );
+  const serveur = await fauxDeepSeek((d) => {
+    const notions = JSON.parse(d.messages[1].content).notions as Array<{ id: string; notion: string }>;
+    return {
+      corps: reponseIA(
+        notions.map((n) =>
+          n.notion === 'Héritage'
+            ? { id: n.id, verdict: 'a_corriger', raison: 'Les membres protected sont aussi hérités.', definition: 'Mécanisme par lequel une classe dérivée reçoit les membres **public** et **protected** de sa classe de base.' }
+            : n.notion === 'POO'
+              ? { id: n.id, verdict: 'correcte', raison: 'OK' }
+              : { id: n.id, verdict: 'manquante', raison: 'Pas de définition', definition: 'Un objet dérivé doit pouvoir remplacer un objet de base sans casser le programme.' },
+        ),
+      ),
+    };
+  });
+  try {
+    const client = creerClientDeepSeek('sk-test', serveur.url);
+    const r = await relireDefinitions(coffre, client, { accepter: true, date: '2026-11-21' });
+    assert.deepEqual(r.correctes, ['POO']);
+    assert.deepEqual(r.corrigees.map((c) => c.titre), ['Héritage']);
+    assert.deepEqual(r.ecrites.map((c) => c.titre), ['Principe de substitution de Liskov']);
+    assert.equal(serveur.recues[0].autorisation, 'Bearer sk-test');
+    assert.equal(serveur.recues[0].chemin, '/chat/completions');
+    assert.equal(serveur.recues[0].model, 'deepseek-chat');
+
+    const heritage = fs.readFileSync(path.join(coffre, 'Notions', 'Héritage.md'), 'utf8');
+    assert.match(heritage, /Corrigée par l'IA/);
+    assert.match(heritage, /\[!quote\]- Définition d'origine[\s\S]*Les membres protected[\s\S]*attributs publics/);
+    assert.match(heritage, /definitions_remplacees:\s*\n\s*- '\[\[P03 - Titre 3\]\]'/);
+    assert.match(heritage, /revue_ia: corrigee/);
+    assert.doesNotMatch(heritage, /\[!info\] Définition générée par IA/);
+
+    // Les exercices n'utilisent que la nouvelle définition
+    const notions = lireNotionsRevision(coffre);
+    const h = notions.find((n) => n.nom === 'Héritage')!;
+    assert.equal(h.definitions.length, 1);
+    assert.match(h.definitions[0].texte, /^Mécanisme par lequel/);
+    assert.match(fs.readFileSync(path.join(coffre, 'Notions', 'POO.md'), 'utf8'), /revue_ia: ok/);
+    assert.match(fs.readFileSync(path.join(coffre, 'Notions', 'Principe de substitution de Liskov.md'), 'utf8'), /Écrite par l'IA[\s\S]*remplacer un objet de base/);
+    assert.ok(r.rapport && fs.existsSync(r.rapport));
+
+    // Un réimport ne remet pas l'ancienne définition fausse
+    ecrirePlan(construirePlan(coffre, [analyse(3, [['Héritage', 'Une classe fille hérite seulement des attributs publics.']])], 'POO'));
+    assert.equal(lireNotionsRevision(coffre).find((n) => n.nom === 'Héritage')!.definitions.length, 1);
+
+    // Une deuxième relecture ne renvoie rien : tout est déjà relu
+    const avant = serveur.recues.length;
+    await relireDefinitions(coffre, client, { accepter: true });
+    assert.equal(serveur.recues.length, avant);
+  } finally {
+    serveur.fermer();
+  }
+});
+
+test('relecture IA : clé refusée → erreur claire', async () => {
+  const coffre = coffreTemporaire();
+  ecrirePlan(construirePlan(coffre, [analyse(4, [['Template', 'Déf']])], 'POO'));
+  const serveur = await fauxDeepSeek(() => ({ statut: 401, corps: { error: 'invalid key' } }));
+  try {
+    await assert.rejects(relireDefinitions(coffre, creerClientDeepSeek('mauvaise', serveur.url), { accepter: true }), (e: unknown) => e instanceof ErreurIA && /Clé DeepSeek refusée/.test(e.message));
+  } finally {
+    serveur.fermer();
+  }
+});

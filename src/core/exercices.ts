@@ -294,13 +294,13 @@ export function genererVerification(n: NotionRevision): Exercice | null {
 // --------------------------------------------------------------------------
 // Choix de l'exercice
 
-export function typesPossibles(n: NotionRevision, toutes: NotionRevision[], rapide: boolean): TypeExercice[] {
+export function typesPossibles(n: NotionRevision, toutes: NotionRevision[], rapide: boolean, verifierDefinitions = false): TypeExercice[] {
   const types: TypeExercice[] = [];
   const avecDef = toutes.filter(aUneDefinition).length;
   if (aUneDefinition(n)) {
     types.push('trou');
     if (avecDef >= 4) types.push('qcm_notion', 'qcm_definition');
-    if (n.statut === 'a_verifier' && !rapide) types.push('verification');
+    if (verifierDefinitions && n.statut === 'a_verifier' && !rapide) types.push('verification');
   }
   if (!rapide || types.length === 0) types.push('flashcard');
   return types;
@@ -312,10 +312,10 @@ const POIDS: Record<TypeExercice, number> = { trou: 3, qcm_notion: 2, qcm_defini
 export function genererExercice(
   n: NotionRevision,
   toutes: NotionRevision[],
-  options: { rapide: boolean; precedent?: TypeExercice; hasard?: Hasard },
+  options: { rapide: boolean; precedent?: TypeExercice; hasard?: Hasard; verifierDefinitions?: boolean },
 ): Exercice {
   const hasard = options.hasard ?? Math.random;
-  let types = typesPossibles(n, toutes, options.rapide);
+  let types = typesPossibles(n, toutes, options.rapide, options.verifierDefinitions);
   if (types.length > 1 && options.precedent) types = types.filter((t) => t !== options.precedent);
   // Une graine jamais révisée dont la définition est à vérifier : on commence souvent par la vérifier
   const poids = (t: TypeExercice) => POIDS[t] * (t === 'verification' && n.etat.niveau === 0 ? 2 : 1);

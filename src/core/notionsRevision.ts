@@ -3,7 +3,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { cheminDossier, DOSSIERS, ecrireNote, lireDate, lireNote } from './coffre';
-import { lireBloc } from './ecritureCoffre';
+import { lireBloc, retirerAvertissementIA } from './ecritureCoffre';
 import type { EtatRevision, TypePreuve } from './repetition';
 import { aujourdhui } from './texte';
 
@@ -20,6 +20,8 @@ export interface NotionRevision {
   prosits: string[];
   module: string;
   statut: 'a_verifier' | 'verifie';
+  /** Relecture par l'IA : a_faire | ok | corrigee | ecrite (vide si non concernée). */
+  revueIA: string;
   definitions: DefinitionLue[];
   notesPerso: string;
   etat: EtatRevision;
@@ -30,7 +32,9 @@ const sansLiens = (t: string) => t.replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, '$2')
 export function lireDefinitions(content: string): DefinitionLue[] {
   const bloc = lireBloc(content, 'definitions') ?? '';
   if (!bloc.trim() || bloc.trim().startsWith('_')) return [];
-  const morceaux = bloc.split(/\*\*D'après \[\[([^\]]+)\]\]\*\*/);
+  // « **Corrigée par l'IA** (date) » n'est qu'une étiquette
+  const sansEtiquette = bloc.replace(/^\s*\*\*(Corrigée|Écrite) par l'IA\*\*[^\n]*\n/, '');
+  const morceaux = sansEtiquette.split(/\*\*D'après \[\[([^\]]+)\]\]\*\*/);
   const definitions: DefinitionLue[] = [];
   if (morceaux[0].trim()) definitions.push({ prosit: null, texte: morceaux[0].trim() });
   for (let i = 1; i + 1 < morceaux.length; i += 2) {
@@ -65,6 +69,7 @@ export function lireNotionRevision(chemin: string): NotionRevision {
     prosits: liste(data.prosits),
     module: sansLiens(String(data.module ?? '')),
     statut: data.statut === 'verifie' ? 'verifie' : 'a_verifier',
+    revueIA: typeof data.revue_ia === 'string' ? data.revue_ia : '',
     definitions: lireDefinitions(content),
     notesPerso: lireNotesPerso(content),
     etat: {
@@ -102,7 +107,7 @@ export function enregistrerEtat(chemin: string, etat: EtatRevision, statut?: 'a_
   if (!tags.includes('forge/notion')) tags.unshift('forge/notion');
   tags.push(`maitrise/${etat.niveau}`);
   data.tags = tags;
-  ecrireNote(chemin, data, content);
+  ecrireNote(chemin, data, statut === 'verifie' ? retirerAvertissementIA(content) : content);
 }
 
 // --------------------------------------------------------------------------

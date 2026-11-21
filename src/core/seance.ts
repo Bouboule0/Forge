@@ -19,6 +19,8 @@ export interface OptionsSeance {
   perimetre: Perimetre;
   /** Réviser même ce qui n'est pas encore à revoir (ne change pas la répétition espacée). */
   entrainement: boolean;
+  /** Proposer « Vérifie la définition » (mode où les définitions IA ne sont pas acceptées d'office). */
+  verifierDefinitions?: boolean;
 }
 
 export interface ResultatReponse {
@@ -110,7 +112,7 @@ export class Seance {
       this.courant = undefined;
       return null;
     }
-    const exercice = genererExercice(notion, this.notions, { rapide: this.options.rapide, precedent: this.precedent, hasard: this.hasard });
+    const exercice = genererExercice(notion, this.notions, { rapide: this.options.rapide, precedent: this.precedent, hasard: this.hasard, verifierDefinitions: this.options.verifierDefinitions });
     this.precedent = exercice.type;
     this.courant = { notion, exercice };
     return this.courant;
