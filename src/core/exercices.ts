@@ -1,10 +1,13 @@
-// Génération et correction des exercices hors ligne (sans IA), à partir des notes du coffre.
+// Génération et correction des exercices à partir des notes du coffre.
+// Les exercices « explication » et « piste_valider » sont corrigés par l'IA (voir correctionIA.ts et seance.ts).
 
 import type { NotionRevision } from './notionsRevision';
+import { ETIQUETTES_STATUT, type PisteRevision } from './pistes';
+import type { StatutPiste } from './parseurCer';
 import type { Resultat, TypePreuve } from './repetition';
 import { distance, motsCles, normaliser, singulier } from './texte';
 
-export type TypeExercice = 'trou' | 'qcm_notion' | 'qcm_definition' | 'flashcard' | 'verification';
+export type TypeExercice = 'trou' | 'qcm_notion' | 'qcm_definition' | 'flashcard' | 'verification' | 'explication' | 'piste_valider' | 'piste_vf';
 
 export const LIBELLES: Record<TypeExercice, string> = {
   trou: 'Texte à trous',
@@ -12,6 +15,9 @@ export const LIBELLES: Record<TypeExercice, string> = {
   qcm_definition: 'QCM — quelle définition ?',
   flashcard: 'Explique avec tes mots',
   verification: 'Vérifie la définition',
+  explication: 'Explique — corrigé par l\'IA',
+  piste_valider: 'Valide une piste de ton CER',
+  piste_vf: 'Piste : validée ou pas ?',
 };
 
 /** Type de preuve enregistré quand l'exercice est réussi (null = ne compte pas comme preuve). */
@@ -21,6 +27,9 @@ export const PREUVES: Record<TypeExercice, TypePreuve | null> = {
   qcm_definition: 'qcm',
   flashcard: null, // auto-évalué
   verification: null,
+  explication: 'explication',
+  piste_valider: null,
+  piste_vf: null,
 };
 
 export interface Exercice {
@@ -37,6 +46,8 @@ export interface Exercice {
   indice?: string;
   /** Phrase complète, montrée après la réponse (trou) */
   solution?: string;
+  /** Pour les exercices sur une piste de solution */
+  piste?: PisteRevision;
 }
 
 export type Hasard = () => number;
@@ -291,10 +302,33 @@ export function genererVerification(n: NotionRevision): Exercice | null {
   };
 }
 
+export function genererExplication(n: NotionRevision): Exercice {
+  return {
+    type: 'explication',
+    notion: n.nom,
+    consigne: `Explique **${n.titre}** avec tes mots`,
+    enonce: "Écris ton explication comme si tu l'expliquais à un camarade (un exemple en C++ est un plus). L'IA la corrige.",
+  };
+}
+
+/** Piste à valider (corrigée par l'IA) ou déjà validée (vrai/faux hors ligne). */
+export function genererPiste(p: PisteRevision): Exercice {
+  const aValider = p.statut === 'a_valider';
+  return {
+    type: aValider ? 'piste_valider' : 'piste_vf',
+    notion: p.prosit,
+    consigne: aValider
+      ? `Cette piste du Prosit **${p.titreProsit}** est-elle juste ? Justifie.`
+      : `Dans le Prosit **${p.titreProsit}**, cette piste a-t-elle été validée ?`,
+    enonce: p.texte,
+    piste: p,
+  };
+}
+
 // --------------------------------------------------------------------------
 // Choix de l'exercice
 
-export function typesPossibles(n: NotionRevision, toutes: NotionRevision[], rapide: boolean, verifierDefinitions = false): TypeExercice[] {
+export function typesPossibles(n: NotionRevision, toutes: NotionRevision[], rapide: boolean, verifierDefinitions = false, ia = false): TypeExercice[] {
   const types: TypeExercice[] = [];
   const avecDef = toutes.filter(aUneDefinition).length;
   if (aUneDefinition(n)) {
@@ -302,20 +336,22 @@ export function typesPossibles(n: NotionRevision, toutes: NotionRevision[], rapi
     if (avecDef >= 4) types.push('qcm_notion', 'qcm_definition');
     if (verifierDefinitions && n.statut === 'a_verifier' && !rapide) types.push('verification');
   }
-  if (!rapide || types.length === 0) types.push('flashcard');
+  // Avec l'IA, l'explication est corrigée ; sans, elle est auto-évaluée (flashcard)
+  if (!rapide && ia) types.push('explication');
+  else if (!rapide || types.length === 0) types.push('flashcard');
   return types;
 }
 
-const POIDS: Record<TypeExercice, number> = { trou: 3, qcm_notion: 2, qcm_definition: 2, flashcard: 1.5, verification: 2 };
+const POIDS: Record<TypeExercice, number> = { trou: 3, qcm_notion: 2, qcm_definition: 2, flashcard: 1.5, verification: 2, explication: 2, piste_valider: 0, piste_vf: 0 };
 
 /** Choisit et génère un exercice pour la notion, en évitant de répéter le type précédent. */
 export function genererExercice(
   n: NotionRevision,
   toutes: NotionRevision[],
-  options: { rapide: boolean; precedent?: TypeExercice; hasard?: Hasard; verifierDefinitions?: boolean },
+  options: { rapide: boolean; precedent?: TypeExercice; hasard?: Hasard; verifierDefinitions?: boolean; ia?: boolean },
 ): Exercice {
   const hasard = options.hasard ?? Math.random;
-  let types = typesPossibles(n, toutes, options.rapide, options.verifierDefinitions);
+  let types = typesPossibles(n, toutes, options.rapide, options.verifierDefinitions, options.ia);
   if (types.length > 1 && options.precedent) types = types.filter((t) => t !== options.precedent);
   // Une graine jamais révisée dont la définition est à vérifier : on commence souvent par la vérifier
   const poids = (t: TypeExercice) => POIDS[t] * (t === 'verification' && n.etat.niveau === 0 ? 2 : 1);
@@ -336,6 +372,7 @@ export function genererExercice(
       : type === 'qcm_notion' ? genererQcmNotion(n, toutes, hasard)
       : type === 'qcm_definition' ? genererQcmDefinition(n, toutes, hasard)
       : type === 'verification' ? genererVerification(n)
+      : type === 'explication' ? genererExplication(n)
       : genererFlashcard(n);
     if (exercice) return exercice;
     essais.splice(essais.indexOf(type), 1);
@@ -351,13 +388,31 @@ export type Reponse =
   | { type: 'option'; index: number }
   | { type: 'jeNeSaisPas' }
   | { type: 'autoEvaluation'; resultat: Resultat }
-  | { type: 'verification'; choix: 'juste' | 'corriger' | 'passer' };
+  | { type: 'verification'; choix: 'juste' | 'corriger' | 'passer' }
+  | { type: 'piste'; statut: StatutPiste; justification: string };
 
 export interface Correction {
   resultat: Resultat | null; // null = ne compte pas (passer / corriger)
   /** Pour la vérification « juste » : la notion devient vérifiée. */
   verifiee?: boolean;
   bonneReponse?: string;
+  /** Retour détaillé de l'IA (explication, piste) */
+  ia?: {
+    note?: number;
+    pointsForts?: string[];
+    aRevoir?: string[];
+    modele?: string;
+    retour?: string;
+    statut?: StatutPiste;
+    justification?: string;
+  };
+  /** L'IA n'a pas pu corriger (réseau, clé…) */
+  erreur?: string;
+}
+
+/** Ces exercices sont corrigés par l'IA (dans la séance), pas par `corriger`. */
+export function corrigeParIA(e: Exercice): boolean {
+  return e.type === 'explication' || e.type === 'piste_valider';
 }
 
 export function corriger(e: Exercice, r: Reponse): Correction {
@@ -375,5 +430,17 @@ export function corriger(e: Exercice, r: Reponse): Correction {
     case 'verification':
       if (r.type !== 'verification') return { resultat: null };
       return r.choix === 'juste' ? { resultat: 'reussite', verifiee: true } : { resultat: null };
+    case 'piste_vf': {
+      const attendu = e.piste?.statut ?? 'a_valider';
+      const bonneReponse = ETIQUETTES_STATUT[attendu];
+      if (r.type !== 'piste') return { resultat: null };
+      if (r.statut === attendu) return { resultat: 'reussite', bonneReponse };
+      // « en partie » contre « validée » : presque
+      const proche = (r.statut === 'partielle' && attendu === 'validee') || (r.statut === 'validee' && attendu === 'partielle');
+      return { resultat: proche ? 'moyen' : 'echec', bonneReponse };
+    }
+    case 'explication':
+    case 'piste_valider':
+      return { resultat: null };
   }
 }

@@ -82,7 +82,7 @@ export function activate(context: vscode.ExtensionContext): void {
   commande('forge.exporterWord', exporterWord);
   commande('forge.ouvrirCoffre', ouvrirCoffre);
   commande('forge.notionsARevoir', afficherNotionsARevoir);
-  commande('forge.reviser', (uri?: vscode.Uri) => lancerRevision(uri, () => barre.actualiser()));
+  commande('forge.reviser', (uri?: vscode.Uri) => lancerRevision(context, uri, () => barre.actualiser()));
 
   context.subscriptions.push(
     barre,

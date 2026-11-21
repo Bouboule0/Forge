@@ -19,7 +19,7 @@ export interface MotCle {
   definition: string;
 }
 
-export type StatutPiste = 'validee' | 'invalidee' | 'a_valider';
+export type StatutPiste = 'validee' | 'partielle' | 'invalidee' | 'a_valider';
 
 export interface Piste {
   texte: string;
@@ -230,6 +230,7 @@ function lireRoles(texte: string, roles: Record<string, string>): string {
 function lireStatut(texte: string): StatutPiste {
   const n = normaliser(texte);
   if (/invalid|faux|refut/.test(n)) return 'invalidee';
+  if (/partiel|en partie/.test(n)) return 'partielle';
   if (/valid|vrai|confirm/.test(n)) return 'validee';
   return 'a_valider';
 }

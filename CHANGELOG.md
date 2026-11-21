@@ -1,5 +1,13 @@
 # Journal des versions
 
+## 0.3.0 — Phase 3 : exercices corrigés par l'IA
+- **Explique avec tes mots, corrigé par DeepSeek** : note sur 10, ce qui est juste, ce qu'il faut revoir, explication modèle. Une explication réussie compte comme preuve d'AAV (débloque les stades au-delà de 🌳 pour les AAV [2]).
+- **Pistes de solutions de tes CER** : choisis validée / en partie / invalidée et justifie ; l'IA corrige et la réponse (statut + justification) est écrite dans le tableau de validation de ton CER, puis dans l'export Word.
+- **Vrai/faux hors ligne** sur les pistes déjà validées (au plus une fois par semaine chacune).
+- Nouveau statut de piste « Validée en partie ».
+- Une erreur de l'IA (réseau, clé) ne casse pas la séance ; rien n'est écrit dans le CER dans ce cas.
+- Test qui vérifie que les scripts des webviews sont du JavaScript valide.
+
 ## 0.2.0 — Phase 2 : révision hors ligne
 - Définitions générées par IA acceptées d'office (réglage `forge.definitionsIA`), relues par DeepSeek : les fausses sont corrigées (l'ancienne version reste visible), les manquantes sont écrites, un rapport est créé.
 - Clé DeepSeek stockée dans le coffre-fort de VS Code ; relecture automatique après chaque import.

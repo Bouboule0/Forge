@@ -12,7 +12,8 @@ const options = scriptIndex >= 0
   ? {
       entryPoints: [args[scriptIndex + 1]],
       outdir: 'dist/scripts',
-      external: ['vscode'],
+      // Les tests tournent hors de VS Code : on remplace son API par une fausse
+      alias: { vscode: './scripts/stub-vscode.ts' },
     }
   : {
       entryPoints: ['src/extension.ts'],

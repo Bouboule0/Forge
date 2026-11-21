@@ -5,6 +5,7 @@ import * as vscode from 'vscode';
 import { marked } from 'marked';
 import { LIBELLES, type Exercice, type Reponse } from '../core/exercices';
 import type { NotionRevision } from '../core/notionsRevision';
+import { texteBrut } from '../core/exercices';
 import { stade } from '../core/repetition';
 import { Seance, type OptionsSeance, type ResultatReponse } from '../core/seance';
 
@@ -14,6 +15,9 @@ const enLigne = (md: string) => marked.parseInline(sansLiens(md), { async: false
 const enBloc = (md: string) => marked.parse(sansLiens(md), { async: false }) as string;
 /** Texte brut (pas de Markdown) → HTML, en gardant le gras **…** des solutions. */
 const texteHtml = (t: string) => echapper(t).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>');
+
+/** Markdown → texte simple (pour la problématique d'un Prosit). */
+const texteSimple = (md: string) => texteBrut(md).replace(/\s*\n\s*/g, ' ');
 
 function formaterDate(date: string): string {
   const [a, m, j] = date.split('-').map(Number);
@@ -31,6 +35,8 @@ export class EcranSeance {
   private readonly panneau: vscode.WebviewPanel;
   private seance: Seance;
   private dernier?: ResultatReponse;
+  private dernierExercice?: Exercice;
+  private occupe = false;
   private readonly abonnements: vscode.Disposable[] = [];
 
   static ouvrir(coffre: string, options: OptionsSeance, surFin: () => void): void {
@@ -64,7 +70,7 @@ export class EcranSeance {
 
   private progression() {
     const b = this.seance.bilan;
-    return { faits: b.faits, reussis: b.reussis, restants: this.seance.restants(), entrainement: this.seance.enEntrainement };
+    return { faits: b.faits, reussis: b.reussis, restants: this.seance.restants(), entrainement: this.seance.enEntrainement, ia: !!this.seance.options.ia };
   }
 
   private envoyerSuivant(): void {
@@ -73,22 +79,23 @@ export class EcranSeance {
       this.envoyerFin();
       return;
     }
-    const { notion, exercice: e } = suivant;
-    const s = stade(notion.etat.niveau);
+    const { notion, piste, exercice: e } = suivant;
+    const s = notion ? stade(notion.etat.niveau) : undefined;
+    const enonceMarkdown = e.type === 'flashcard' || e.type === 'verification' || e.type === 'explication';
     this.envoyer({
       type: 'exercice',
       progression: this.progression(),
       exercice: {
         type: e.type,
         libelle: LIBELLES[e.type],
-        notion: notion.titre,
-        stade: `${s.emoji} ${s.nom}`,
+        sousTitre: s ? `${s.emoji} ${s.nom}` : `🧩 ${piste?.prosit ?? ''}`,
         consigne: enLigne(e.consigne),
-        enonce: e.type === 'flashcard' || e.type === 'verification' ? enLigne(e.enonce) : texteHtml(e.enonce),
+        enonce: enonceMarkdown ? enLigne(e.enonce) : texteHtml(e.enonce),
         options: e.options?.map(texteHtml),
         indice: e.indice,
         // La vérification montre directement la définition à relire
-        definitions: e.type === 'verification' ? definitionsHtml(notion) : undefined,
+        definitions: e.type === 'verification' && notion ? definitionsHtml(notion) : undefined,
+        problematique: piste?.problematique ? texteHtml(texteSimple(piste.problematique)) : undefined,
       },
     });
   }
@@ -96,17 +103,32 @@ export class EcranSeance {
   private envoyerCorrection(r: ResultatReponse): void {
     const exercice = this.dernierExercice;
     const ch = r.changement;
+    const ia = r.correction.ia;
     this.envoyer({
       type: 'correction',
       progression: this.progression(),
       correction: {
         resultat: r.correction.resultat,
+        erreur: r.correction.erreur,
         compte: r.compte,
+        estPiste: !!r.piste,
         verifiee: !!r.correction.verifiee,
         bonneReponse: r.correction.bonneReponse ? texteHtml(r.correction.bonneReponse) : undefined,
         solution: exercice?.solution ? texteHtml(exercice.solution) : undefined,
         bonneOption: exercice?.bonneOption,
-        definitions: definitionsHtml(r.notion),
+        definitions: r.notion ? definitionsHtml(r.notion) : undefined,
+        // Pour une piste déjà validée, on rappelle la justification du CER
+        justificationCer: exercice?.type === 'piste_vf' && r.piste?.justification ? enLigne(r.piste.justification) : undefined,
+        ia: ia
+          ? {
+              note: ia.note,
+              pointsForts: ia.pointsForts?.map(enLigne),
+              aRevoir: ia.aRevoir?.map(enLigne),
+              modele: ia.modele ? enBloc(ia.modele) : undefined,
+              retour: ia.retour ? enLigne(ia.retour) : undefined,
+              justification: ia.justification ? enLigne(ia.justification) : undefined,
+            }
+          : undefined,
         peutRectifier: exercice?.type === 'trou' && r.correction.resultat === 'echec',
         changement: ch
           ? {
@@ -120,8 +142,6 @@ export class EcranSeance {
       },
     });
   }
-
-  private dernierExercice?: Exercice;
 
   private envoyerFin(): void {
     const bilan = this.seance.terminer();
@@ -137,7 +157,11 @@ export class EcranSeance {
     this.surFin();
   }
 
-  private courante?: NotionRevision;
+  /** Note à ouvrir : la notion, ou la note Prosit pour une piste. */
+  private cheminCourant(): string | undefined {
+    const source = this.dernier ?? this.seance.enCours;
+    return source?.notion?.chemin ?? source?.piste?.chemin;
+  }
 
   private async recevoir(m: { type: string; reponse?: Reponse }): Promise<void> {
     switch (m.type) {
@@ -145,24 +169,30 @@ export class EcranSeance {
         this.envoyerSuivant();
         break;
       case 'reponse': {
-        if (!m.reponse) return;
-        const verifCorriger = m.reponse.type === 'verification' && m.reponse.choix === 'corriger';
+        if (!m.reponse || this.occupe) return;
         const courant = this.seance.enCours;
-        this.dernierExercice = courant?.exercice;
-        this.courante = courant?.notion;
-        const r = this.seance.repondre(m.reponse);
-        this.dernier = r;
-        if (verifCorriger) {
-          await vscode.window.showTextDocument(vscode.Uri.file(r.notion.chemin), { viewColumn: vscode.ViewColumn.Beside, preview: false });
+        if (!courant) return;
+        this.occupe = true;
+        try {
+          this.dernierExercice = courant.exercice;
+          this.dernier = undefined;
+          const verifCorriger = m.reponse.type === 'verification' && m.reponse.choix === 'corriger';
+          const r = await this.seance.repondre(m.reponse);
+          this.dernier = r;
+          if (verifCorriger && r.notion) {
+            await vscode.window.showTextDocument(vscode.Uri.file(r.notion.chemin), { viewColumn: vscode.ViewColumn.Beside, preview: false });
+          }
+          if (r.correction.resultat === null && !r.correction.erreur) this.envoyerSuivant();
+          else this.envoyerCorrection(r);
+          this.surFin();
+        } finally {
+          this.occupe = false;
         }
-        if (r.correction.resultat === null) this.envoyerSuivant();
-        else this.envoyerCorrection(r);
-        this.surFin();
         break;
       }
       case 'reveler':
         // Flashcard : on montre la définition avant l'auto-évaluation
-        if (this.seance.enCours) this.envoyer({ type: 'revelation', definitions: definitionsHtml(this.seance.enCours.notion) });
+        if (this.seance.enCours?.notion) this.envoyer({ type: 'revelation', definitions: definitionsHtml(this.seance.enCours.notion) });
         break;
       case 'rectifier':
         if (this.dernier) {
@@ -172,10 +202,11 @@ export class EcranSeance {
         }
         break;
       case 'suivant':
+        this.dernier = undefined;
         this.envoyerSuivant();
         break;
       case 'ouvrirNote': {
-        const chemin = this.dernier?.notion.chemin ?? this.courante?.chemin;
+        const chemin = this.cheminCourant();
         if (chemin) await vscode.window.showTextDocument(vscode.Uri.file(chemin), { viewColumn: vscode.ViewColumn.Beside, preview: false });
         break;
       }
@@ -258,6 +289,19 @@ export function html(webview: Pick<vscode.Webview, 'cspSource'>): string {
   ul.plantes { list-style: none; padding: 0; columns: 2; }
   kbd { font-family: var(--vscode-editor-font-family); font-size: 12px; padding: 0 4px; border: 1px solid var(--vscode-panel-border); border-radius: 3px; }
   .aide { color: var(--vscode-descriptionForeground); font-size: 12px; margin-top: 18px; }
+  .piste { font-size: 1.1em; font-style: italic; border-left: 3px solid var(--orange); padding: 6px 14px; margin: 12px 0; background: var(--vscode-textBlockQuote-background); }
+  .problematique { font-size: 13px; color: var(--vscode-descriptionForeground); }
+  .statuts { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
+  .statut { padding: 8px 14px; border-radius: 6px; cursor: pointer; font: inherit; border: 2px solid transparent;
+            background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
+  .statut.choisi { border-color: var(--vscode-focusBorder); }
+  .attente { margin-top: 14px; color: var(--vscode-descriptionForeground); }
+  .attente::after { content: ''; display: inline-block; width: 1em; animation: points 1.2s steps(4) infinite; overflow: hidden; vertical-align: bottom; }
+  @keyframes points { 0% { content: ''; } 25% { content: '.'; } 50% { content: '..'; } 75% { content: '...'; } }
+  .retour-ia { margin: 10px 0; padding: 10px 14px; border-radius: 6px; background: var(--vscode-textBlockQuote-background); }
+  .retour-ia ul { margin: 4px 0 8px; padding-left: 20px; }
+  .cer { margin: 10px 0; padding: 10px 14px; border-radius: 6px; border: 1px dashed var(--vscode-panel-border); }
+  button:disabled { opacity: .5; cursor: default; }
 </style>
 </head>
 <body>
@@ -270,7 +314,7 @@ export function html(webview: Pick<vscode.Webview, 'cspSource'>): string {
   </header>
 
   <div id="zone" class="carte"><p>Chargement…</p></div>
-  <p class="aide"><kbd>Entrée</kbd> valider / suivant · <kbd>1</kbd>–<kbd>4</kbd> choisir une réponse · <kbd>Échap</kbd> je ne sais pas</p>
+  <p class="aide"><kbd>Entrée</kbd> valider / suivant · <kbd>Ctrl</kbd>+<kbd>Entrée</kbd> envoyer un texte · <kbd>1</kbd>–<kbd>4</kbd> choisir une réponse · <kbd>Échap</kbd> je ne sais pas</p>
 </div>
 
 <script nonce="${n}">
@@ -279,6 +323,8 @@ const zone = document.getElementById('zone');
 let etat = 'attente';   // exercice | revelation | correction | fin
 let exercice = null;
 let choisi = null;
+let statutChoisi = null;
+const STATUTS = [['validee', '✅ Validée'], ['partielle', '⚠️ En partie'], ['invalidee', '❌ Invalidée']];
 
 const envoyer = (m) => vscode.postMessage(m);
 const repondre = (reponse) => { if (etat === 'exercice' || etat === 'revelation') { etat = 'envoi'; envoyer({ type: 'reponse', reponse }); } };
@@ -293,8 +339,10 @@ function afficherExercice(e) {
   exercice = e;
   choisi = null;
   etat = 'exercice';
-  let corps = '<div class="type">' + e.libelle + '</div><div class="notion">' + e.stade + '</div>' +
+  statutChoisi = null;
+  let corps = '<div class="type">' + e.libelle + '</div><div class="notion">' + e.sousTitre + '</div>' +
               '<div class="consigne">' + e.consigne + '</div>';
+  if (e.problematique) corps += '<div class="problematique">Problématique : ' + e.problematique + '</div>';
   if (e.type === 'trou') {
     corps += '<div class="enonce">' + e.enonce + '</div>' +
       '<input type="text" id="saisie" placeholder="Le mot manquant…" autocomplete="off">' +
@@ -311,6 +359,20 @@ function afficherExercice(e) {
       '<textarea id="saisie" placeholder="(facultatif) Écris ton explication…"></textarea>' +
       '<div id="revelation"></div>' +
       '<div class="actions" id="actionsFlash"><button class="principal" id="reveler">Voir la définition</button></div>';
+  } else if (e.type === 'explication') {
+    corps += '<div class="enonce">' + e.enonce + '</div>' +
+      '<textarea id="saisie" placeholder="Ton explication…"></textarea>' +
+      '<div class="actions"><button class="principal" id="envoyerIA">🤖 Envoyer à l\\'IA</button>' +
+      '<button class="lien" id="nsp">Je ne sais pas</button></div>';
+  } else if (e.type === 'piste_valider') {
+    corps += '<div class="piste">« ' + e.enonce + ' »</div>' +
+      '<div class="statuts">' + STATUTS.map((x) => '<button class="statut" data-statut="' + x[0] + '">' + x[1] + '</button>').join('') + '</div>' +
+      '<textarea id="saisie" placeholder="Ta justification (pourquoi ?)…"></textarea>' +
+      '<div class="actions"><button class="principal" id="envoyerIA" disabled>🤖 Envoyer à l\\'IA</button>' +
+      '<button class="lien" id="nsp">Je ne sais pas</button></div>';
+  } else if (e.type === 'piste_vf') {
+    corps += '<div class="piste">« ' + e.enonce + ' »</div>' +
+      '<div class="statuts">' + STATUTS.map((x, i) => '<button class="statut" data-statut="' + x[0] + '"><span class="touche">' + (i + 1) + '</span> ' + x[1] + '</button>').join('') + '</div>';
   } else if (e.type === 'verification') {
     corps += '<div class="enonce">' + e.enonce + '</div><div class="definition">' + e.definitions + '</div>' +
       '<div class="actions"><button class="principal" data-verif="juste">✅ Elle est juste</button>' +
@@ -326,6 +388,40 @@ function afficherExercice(e) {
   lier('reveler', () => envoyer({ type: 'reveler' }));
   zone.querySelectorAll('.option').forEach((b) => b.onclick = () => { choisi = Number(b.dataset.i); repondre({ type: 'option', index: choisi }); });
   zone.querySelectorAll('[data-verif]').forEach((b) => b.onclick = () => repondre({ type: 'verification', choix: b.dataset.verif }));
+
+  // Exercices corrigés par l'IA
+  const envoyerIA = document.getElementById('envoyerIA');
+  const majEnvoi = () => { if (envoyerIA && e.type === 'piste_valider') envoyerIA.disabled = !statutChoisi || !saisie.value.trim(); };
+  if (saisie && e.type === 'piste_valider') saisie.addEventListener('input', majEnvoi);
+  zone.querySelectorAll('.statut').forEach((b) => b.onclick = () => {
+    if (e.type === 'piste_vf') { repondre({ type: 'piste', statut: b.dataset.statut, justification: '' }); return; }
+    statutChoisi = b.dataset.statut;
+    zone.querySelectorAll('.statut').forEach((x) => x.classList.toggle('choisi', x === b));
+    majEnvoi();
+    saisie.focus();
+  });
+  if (envoyerIA) envoyerIA.onclick = () => {
+    if (envoyerIA.disabled) return;
+    if (e.type === 'explication' && !saisie.value.trim()) { saisie.focus(); return; }
+    const reponse = e.type === 'explication'
+      ? { type: 'texte', valeur: saisie.value }
+      : { type: 'piste', statut: statutChoisi, justification: saisie.value };
+    attendreIA();
+    repondre(reponse);
+  };
+  if (e.type === 'piste_valider' || e.type === 'explication') {
+    const nsp = document.getElementById('nsp');
+    nsp.onclick = () => { if (e.type === 'piste_valider') attendreIA(); repondre({ type: 'jeNeSaisPas' }); };
+  }
+}
+
+function attendreIA() {
+  zone.querySelectorAll('.actions button, .statut, textarea').forEach((x) => x.disabled = true);
+  const attente = document.createElement('div');
+  attente.className = 'attente';
+  attente.id = 'attente';
+  attente.textContent = "🤖 L'IA corrige ta réponse";
+  zone.appendChild(attente);
 }
 
 function lier(id, action) { const el = document.getElementById(id); if (el) el.onclick = action; }
@@ -353,24 +449,48 @@ function afficherCorrection(c) {
     else if (Number(b.dataset.i) === choisi) b.classList.add('mauvaise');
   });
   zone.querySelectorAll('.actions').forEach((a) => a.remove());
+  document.getElementById('attente')?.remove();
+  zone.querySelectorAll('.statut').forEach((b) => { b.disabled = true; });
   const saisie = document.getElementById('saisie');
   if (saisie) saisie.disabled = true;
 
+  if (c.erreur) {
+    const bloc = document.createElement('div');
+    bloc.innerHTML = '<div class="verdict echec">⚠️ L\\'IA n\\'a pas pu corriger</div><p>' + c.erreur.replace(/</g, '&lt;') + '</p>' +
+      '<div class="actions"><button class="principal" id="suivant">Passer ➜</button></div>';
+    zone.appendChild(bloc);
+    lier('suivant', () => { etat = 'attente'; envoyer({ type: 'suivant' }); });
+    document.getElementById('suivant').focus();
+    return;
+  }
+
   let html = '<div class="verdict ' + classe + '">' + texte + (c.verifiee ? ' — définition vérifiée' : '') + '</div>';
   if (c.solution) html += '<div class="enonce">' + c.solution + '</div>';
+  else if (c.estPiste && c.bonneReponse) html += '<p>Bonne réponse : <strong>' + c.bonneReponse + '</strong></p>';
   else if (c.resultat === 'echec' && c.bonneReponse && !exercice.options) html += '<p>Réponse attendue : <strong>' + c.bonneReponse + '</strong></p>';
+  if (c.justificationCer) html += '<div class="cer">📝 Justification de ton CER : ' + c.justificationCer + '</div>';
+  if (c.ia) {
+    let retour = '';
+    if (typeof c.ia.note === 'number' && exercice.type === 'explication') retour += '<p><strong>Note : ' + c.ia.note + '/10</strong></p>';
+    if (c.ia.retour) retour += '<p>' + c.ia.retour + '</p>';
+    if (c.ia.pointsForts?.length) retour += '<div>✅ Ce qui est juste :</div><ul>' + c.ia.pointsForts.map((x) => '<li>' + x + '</li>').join('') + '</ul>';
+    if (c.ia.aRevoir?.length) retour += '<div>🔎 À revoir :</div><ul>' + c.ia.aRevoir.map((x) => '<li>' + x + '</li>').join('') + '</ul>';
+    if (retour) html += '<div class="retour-ia">' + retour + '</div>';
+    if (c.ia.modele) html += '<details open><summary>💡 Explication modèle</summary><div class="definition">' + c.ia.modele + '</div></details>';
+    if (c.ia.justification) html += '<div class="cer">📝 Écrit dans ton CER : <strong>' + (c.bonneReponse || '') + '</strong> — ' + c.ia.justification + '</div>';
+  }
   if (c.changement) {
     const fleche = c.changement.sens > 0 ? '⬆️' : c.changement.sens < 0 ? '⬇️' : '➡️';
     html += '<div class="croissance">' + fleche + ' ' + c.changement.avant + (c.changement.sens ? ' → ' + c.changement.apres : '') +
             ' · prochaine révision ' + c.changement.prochaine +
             (c.changement.bloque ? '<div class="bloque">🔒 ' + c.changement.bloque + '</div>' : '') + '</div>';
-  } else if (!c.compte) {
+  } else if (!c.compte && !c.estPiste) {
     html += '<div class="croissance">🏋️ Entraînement : ne change pas ta plante.</div>';
   }
-  if (exercice.type !== 'verification' && exercice.type !== 'flashcard') html += '<details><summary>Voir la définition</summary><div class="definition">' + c.definitions + '</div></details>';
+  if (c.definitions && exercice.type !== 'verification' && exercice.type !== 'flashcard') html += '<details><summary>Voir la définition</summary><div class="definition">' + c.definitions + '</div></details>';
   html += '<div class="actions"><button class="principal" id="suivant">Suivant ➜</button>' +
           (c.peutRectifier ? '<button class="secondaire" id="rectifier">J\\'avais bon en fait</button>' : '') +
-          '<button class="lien" id="ouvrir">✏️ Ouvrir la note</button></div>';
+          '<button class="lien" id="ouvrir">✏️ ' + (c.estPiste ? 'Ouvrir le Prosit' : 'Ouvrir la note') + '</button></div>';
   const bloc = document.createElement('div');
   bloc.innerHTML = html;
   zone.appendChild(bloc);
@@ -391,6 +511,7 @@ function afficherFin(b, entrainement) {
       '<div class="chiffre"><b>🔥 ' + b.serie + '</b>jour(s) de suite</div>' +
     '</div>';
   if (b.verifiees) html += '<p>✅ ' + b.verifiees + ' définition(s) vérifiée(s).</p>';
+  if (b.pistesValidees) html += '<p>📝 ' + b.pistesValidees + ' piste(s) de solution ajoutée(s) à tes CER.</p>';
   if (b.montees.length) html += '<h3>Ce qui a poussé</h3><ul class="plantes">' + b.montees.map((m) => '<li>' + m.avant + ' → ' + m.apres + ' ' + m.titre + '</li>').join('') + '</ul>';
   if (b.descentes.length) html += '<h3>À retravailler</h3><ul class="plantes">' + b.descentes.map((m) => '<li>' + m.avant + ' → ' + m.apres + ' ' + m.titre + '</li>').join('') + '</ul>';
   if (!entrainement) html += '<p>' + (b.restants ? b.restants + ' notion(s) attendent encore aujourd\\'hui.' : 'Plus rien à revoir aujourd\\'hui. Reviens demain 🌞') + '</p>';
@@ -416,13 +537,21 @@ window.addEventListener('message', (ev) => {
 document.getElementById('stop').onclick = () => envoyer({ type: 'stop' });
 
 document.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey) && etat === 'exercice') {
+    ev.preventDefault();
+    document.getElementById('envoyerIA')?.click();
+    return;
+  }
   if (ev.key === 'Enter' && !ev.shiftKey) {
+    if (document.activeElement?.tagName === 'TEXTAREA' && etat === 'exercice') return;
     if (etat === 'correction') { ev.preventDefault(); document.getElementById('suivant')?.click(); }
     else if (etat === 'exercice' && exercice?.type === 'trou') { ev.preventDefault(); document.getElementById('valider')?.click(); }
     else if (etat === 'exercice' && exercice?.type === 'flashcard' && document.activeElement?.id !== 'saisie') { ev.preventDefault(); document.getElementById('reveler')?.click(); }
+  } else if (etat === 'exercice' && exercice?.type === 'piste_vf' && /^[1-3]$/.test(ev.key)) {
+    zone.querySelectorAll('.statut')[Number(ev.key) - 1]?.click();
   } else if (etat === 'exercice' && exercice?.options && /^[1-4]$/.test(ev.key)) {
     zone.querySelector('.option[data-i="' + (Number(ev.key) - 1) + '"]')?.click();
-  } else if (ev.key === 'Escape' && etat === 'exercice') {
+  } else if (ev.key === 'Escape' && etat === 'exercice' && !document.getElementById('attente')) {
     document.getElementById('nsp')?.click();
   }
 });
