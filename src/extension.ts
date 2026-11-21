@@ -23,7 +23,7 @@ declare const __VERSION_BUILD__: string;
 
 /** Le code compilé ne correspond pas au package.json : il faut relancer npm install + build. */
 function verifierBuild(context: vscode.ExtensionContext): void {
-  const attendue = String(context.extension.packageJSON.version ?? '');
+  const attendue = String(context.extension?.packageJSON?.version ?? '');
   const compilee = typeof __VERSION_BUILD__ === 'string' ? __VERSION_BUILD__ : '?';
   if (attendue && compilee !== attendue) {
     vscode.window.showWarningMessage(
@@ -35,7 +35,11 @@ function verifierBuild(context: vscode.ExtensionContext): void {
 export function activate(context: vscode.ExtensionContext): void {
   contexte = context;
   journal = vscode.window.createOutputChannel('Forge');
-  verifierBuild(context);
+  try {
+    verifierBuild(context);
+  } catch {
+    // Une simple vérification ne doit jamais empêcher l'extension de démarrer
+  }
   const barre = new BarreEtat();
 
   const commande = (id: string, action: (...args: any[]) => unknown) =>
