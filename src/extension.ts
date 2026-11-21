@@ -17,8 +17,22 @@ import { lancerRevision, suggererRevision } from './revision';
 
 let journal: vscode.OutputChannel;
 
+declare const __VERSION_BUILD__: string;
+
+/** Le code compilé ne correspond pas au package.json : il faut relancer npm install + build. */
+function verifierBuild(context: vscode.ExtensionContext): void {
+  const attendue = String(context.extension.packageJSON.version ?? '');
+  const compilee = typeof __VERSION_BUILD__ === 'string' ? __VERSION_BUILD__ : '?';
+  if (attendue && compilee !== attendue) {
+    vscode.window.showWarningMessage(
+      `Forge n'a pas été reconstruite après la mise à jour (code ${compilee}, version ${attendue}). Dans le terminal du projet : npm install, puis arrête et relance le débogage (F5).`,
+    );
+  }
+}
+
 export function activate(context: vscode.ExtensionContext): void {
   journal = vscode.window.createOutputChannel('Forge');
+  verifierBuild(context);
   const barre = new BarreEtat();
 
   const commande = (id: string, action: (...args: any[]) => unknown) =>

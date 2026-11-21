@@ -135,6 +135,7 @@ test('export Word : tableau des mots-clés et validation des pistes', () => {
 import { ajouterJours, appliquerResultat, plafond, type EtatRevision } from '../src/core/repetition';
 import { corriger, genererQcmNotion, genererTrou, masquerNom, reponseCorrecte } from '../src/core/exercices';
 import { lireNotionsRevision, serieDeJours } from '../src/core/notionsRevision';
+import { aujourdhui } from '../src/core/texte';
 import { Seance } from '../src/core/seance';
 
 const etat = (niveau: number, aavCible = 2, preuves = {}): EtatRevision => ({ niveau, prochaine: null, derniere: null, aavCible, reussites: 0, echecs: 0, preuves });
@@ -209,7 +210,7 @@ test('génération des exercices à partir des notes', () => {
 
 test('séance : la réussite fait pousser et est enregistrée, l’échec revient', () => {
   const coffre = coffreAvecNotions();
-  const seance = new Seance(coffre, { rapide: true, entrainement: false, perimetre: { type: 'tout' } }, hasardFixe(), '2026-11-20');
+  const seance = new Seance(coffre, { rapide: true, entrainement: false, perimetre: { type: 'tout' } }, hasardFixe(), aujourdhui());
   assert.equal(seance.aRevoir().length, 5);
   const premier = seance.suivant()!;
   const bonne = premier.exercice.options ? { type: 'option' as const, index: premier.exercice.bonneOption! } : { type: 'texte' as const, valeur: premier.exercice.attendu! };
