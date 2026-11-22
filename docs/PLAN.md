@@ -248,7 +248,7 @@ Le tableau de bord indique, par Prosit, la part des AAV réellement atteints.
 
 ---
 
-## 12. Étapes de réalisation
+## 12. Étapes de réalisation (phases principales)
 
 | Phase | Contenu | Résultat |
 |---|---|---|
@@ -261,6 +261,10 @@ Le tableau de bord indique, par Prosit, la part des AAV réellement atteints.
 | **6. Finitions** | Mode examen (CCTL et étude de cas), statistiques, UML Mermaid, `.vsix` partageable | Version 1.0 |
 
 ---
+
+### Phases annexes
+
+Les phases 0 à 6 ci-dessus sont les **phases principales** : le socle de Forge. D'autres idées s'ajouteront ensuite sous forme de **phases annexes** (à définir ensemble).
 
 ## 13. Points de vigilance
 - **Pas de corrigé officiel** : l'IA peut se tromper. Garde-fous : statut `à vérifier`, tests réels pour le code, bouton « Signaler une erreur », et un mode qui demande à DeepSeek ses sources.

@@ -15,8 +15,10 @@ Le plan complet est dans [`docs/PLAN.md`](docs/PLAN.md).
 | 2. Révision hors ligne | Texte à trous, QCM, répétition espacée, séances | ✅ |
 | 3. IA (DeepSeek) | Relecture des définitions, explications corrigées, pistes de solutions | ✅ |
 | 4. Code | Exercices C++ compilés et testés, prédis la sortie, trouve le bug, mini-projets, mode papier | ✅ |
-| 5. Ferme | Ferme pixel-art que tu aménages toi-même | ⏳ |
+| 5. Ferme | Ferme pixel-art que tu aménages toi-même | ✅ |
 | 6. Finitions | Mode examen (CCTL, étude de cas), statistiques, `.vsix` | ⏳ |
+
+Ces six phases sont les **phases principales** du projet. D'autres idées viendront ensuite sous forme de **phases annexes**.
 
 ---
 
@@ -215,11 +217,24 @@ Chaque exercice est rangé dans `Exercices/<notion>/` : `enonce.md` (lisible dan
 
 Le sujet, ta copie et la correction sont enregistrés dans `Exercices/<Prosit>/`. Avec au moins 10/20, les notions du Prosit gagnent la preuve « papier » (et « exercice long » si l'épreuve dure 30 min ou plus).
 
+## 🌻 Ma ferme
+
+Ouvre-la avec 🌻 dans la barre d'état, **Forge : Ma ferme**, ou le bouton en fin de séance.
+
+- **Chaque notion est une plante** que tu places où tu veux (onglet 🌰 Graines, ou « Tout planter »). Chaque Prosit a sa variété : pommier, oranger, myrtillier, citronnier…
+- **Réviser fait pousser** : 🌰 graine → 🌱 → 🌿 → 🪴 → 🌳 → 🌸 en fleurs → 🍎 récoltable (c'est le niveau de répétition espacée).
+- 💧 une goutte = notion à réviser ; une plante **grisée fane** (révision en retard) ; elle ne meurt jamais, il suffit de la réviser.
+- **Pièces** 🪙 : gagnées en révisant (5 par réussite, 15 par exercice de code, 40 par mini-projet, 2× la note d'une étude de cas, +20 de récolte sur une notion 🍎…).
+- **Boutique** : chemins, clôtures, fleurs, banc, lanterne, épouvantail, ruche, puits, étang, grand chêne, grange… Les plus belles décorations se débloquent avec ton **niveau de fermier**, et la ferme **s'agrandit** à chaque niveau.
+- Clic sur une plante : la réviser, ouvrir sa note, la déplacer. Clic sur une décoration : la déplacer ou la ranger (onglet 🎒).
+- 📸 **Photo pour Obsidian** : enregistre `Ferme.md` + l'image dans ton coffre.
+
 ## 🧭 Les commandes
 
 | Commande | Ce qu'elle fait |
 |---|---|
 | Forge : Réviser | Lance une séance (Ctrl+Alt+R) |
+| Forge : Ma ferme | Ta ferme pixel-art (aussi 🌻 dans la barre d'état) |
 | Forge : Vérifier l'installation | Teste `wsl g++` (compile et lance « Hello Forge »), pandoc et git |
 | Forge : Créer / choisir le coffre Obsidian | Crée les dossiers et règle les couleurs du graphe |
 | Forge : Importer des CER / Prosits (.docx) | Lit tes Word et crée les notes, après l'écran de validation |
@@ -288,6 +303,6 @@ npm run essai-import -- ./coffre-test chemin/vers/CER.docx
 | Dossier | Contenu |
 |---|---|
 | `src/core/` | Logique sans VS Code : import, coffre, export Word, répétition espacée, exercices, pistes, séance, corrections IA, compilation, exercices de code, études de cas |
-| `src/vues/` | Webviews (écran de validation, séance, étude de cas sur papier) |
+| `src/vues/` | Webviews (écran de validation, séance, étude de cas sur papier, ferme et ses sprites) |
 | `src/extension.ts` | Commandes VS Code |
 | `scripts/` | Tests et essais en ligne de commande |

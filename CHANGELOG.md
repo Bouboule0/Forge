@@ -1,5 +1,14 @@
 # Journal des versions
 
+## 0.5.0 — Phase 5 : la ferme
+- **Ma ferme** (commande, 🌻 dans la barre d'état, bouton en fin de séance) : une plante pixel-art par notion, que tu places toi-même.
+- 7 stades de croissance (🌰 → 🍎) liés à la répétition espacée ; 8 variétés (une par Prosit) ; les notions en retard **fanent**, celles à réviser ont une goutte 💧, les mûres brillent.
+- **Pièces** 🪙 gagnées en révisant (recalculées depuis l'historique : rien n'est compté deux fois, juste même entre deux ordinateurs), bonus de récolte sur les notions mûres, exercices de code et études de cas mieux payés.
+- **Boutique** de 14 décorations (chemin, clôture, fleurs, banc, lanterne qui éclaire, épouvantail, ruche, puits, étang, grand chêne, grange…), débloquées par le **niveau de fermier** ; la ferme s'agrandit à chaque niveau.
+- Placement à la souris, « Tout planter », déplacer, ranger ; fiche d'une plante avec « Réviser » et « Note ».
+- Couleurs du sol selon la saison ; 📸 photo de la ferme dans le coffre (`Ferme.md`) pour Obsidian.
+- Bilan de séance : pièces gagnées.
+
 ## 0.4.0 — Phase 4 : code C++ et études de cas
 - **Exercices de code** générés par l'IA puis **vérifiés par Forge avant de te les donner** : la solution doit passer les tests, le code de départ doit compiler et échouer (sinon l'IA corrige, jusqu'à 3 essais).
   - ⌨️ Exercice de code (5–10 min), 🐞 Trouve le bug, 🧱 Mini-projet dans l'histoire d'un Prosit (20–40 min).

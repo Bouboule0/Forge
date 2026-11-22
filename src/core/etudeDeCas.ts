@@ -5,7 +5,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { cheminDossier } from './coffre';
-import { ajouterPreuve, type NotionRevision } from './notionsRevision';
+import { ajouterHistorique, ajouterPreuve, type NotionRevision } from './notionsRevision';
 import { ErreurIA, type ClientIA } from './relectureIA';
 import { aujourdhui, nomFichierSur } from './texte';
 
@@ -157,6 +157,15 @@ export function enregistrerEtude(
   });
   lignes.push('## Notions', '', ...notions.map((n) => `- [[${n.nom}]]`), '');
   fs.writeFileSync(chemin, lignes.join('\n'));
+
+  ajouterHistorique(coffre, {
+    date: new Date().toISOString(),
+    notion: `etude:${prosit}`,
+    type: 'etude_de_cas',
+    resultat: correction.note >= 10 ? 'reussite' : correction.note >= 7 ? 'moyen' : 'echec',
+    compte: false,
+    points: correction.note,
+  });
 
   // La moyenne prouve l'AAV « savoir faire sur papier » (et un exercice long si l'épreuve dure 30 min ou plus)
   if (correction.note >= 10) {

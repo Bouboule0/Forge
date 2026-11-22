@@ -2,7 +2,7 @@
   "name": "forge",
   "displayName": "Forge — Révision par l'action",
   "description": "Transforme tes Prosits et CER (CESI) en second cerveau Obsidian et t'aide à réviser en codant.",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "publisher": "bouboule0",
   "license": "MIT",
   "repository": {
@@ -27,6 +27,12 @@
         "title": "Réviser",
         "category": "Forge",
         "icon": "$(mortar-board)"
+      },
+      {
+        "command": "forge.ferme",
+        "title": "Ma ferme",
+        "category": "Forge",
+        "icon": "$(home)"
       },
       {
         "command": "forge.verifierInstallation",
