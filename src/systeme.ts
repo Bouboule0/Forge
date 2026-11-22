@@ -7,6 +7,8 @@ export interface ResultatCommande {
   sortie: string;
   erreurs: string;
   introuvable: boolean;
+  /** Arrêté car trop long (délai dépassé) */
+  tue?: boolean;
 }
 
 /** Découpe « wsl g++ -std=c++17 » en programme + arguments. */
@@ -42,15 +44,34 @@ export function executer(
   options: { cwd?: string; delaiMs?: number } = {},
 ): Promise<ResultatCommande> {
   const { programme, arguments: args } = decouperCommande(commande);
+  return executerFichier(programme, argumentsPour(programme, [...args, ...argumentsSupplementaires]), options);
+}
+
+/**
+ * Avec WSL, `wsl -e programme args` lance le programme sans passer par le shell Linux :
+ * les chemins contenant des espaces, apostrophes ou parenthèses restent intacts.
+ */
+export function argumentsPour(programme: string, args: string[]): string[] {
+  const wsl = /^wsl(\.exe)?$/i.test(programme);
+  return wsl && args.length > 0 && !args[0].startsWith('-') ? ['-e', ...args] : args;
+}
+
+/** Lance un programme dont le chemin peut contenir des espaces (il n'est pas découpé). */
+export function executerFichier(
+  programme: string,
+  args: string[],
+  options: { cwd?: string; delaiMs?: number } = {},
+): Promise<ResultatCommande> {
   return new Promise((resolve) => {
     execFile(
       programme,
-      [...args, ...argumentsSupplementaires],
+      args,
       { cwd: options.cwd, timeout: options.delaiMs ?? 60_000, windowsHide: true, maxBuffer: 10 * 1024 * 1024 },
       (erreur, sortie, erreurs) => {
         const introuvable = (erreur as NodeJS.ErrnoException | null)?.code === 'ENOENT';
         const code = erreur ? (typeof (erreur as { code?: unknown }).code === 'number' ? Number((erreur as { code?: unknown }).code) : 1) : 0;
-        resolve({ code, sortie: String(sortie ?? ''), erreurs: String(erreurs ?? '') || (erreur && !sortie ? erreur.message : ''), introuvable });
+        const tue = !!(erreur as { killed?: boolean } | null)?.killed;
+        resolve({ code, sortie: String(sortie ?? ''), erreurs: String(erreurs ?? '') || (erreur && !sortie ? erreur.message : ''), introuvable, tue });
       },
     );
   });

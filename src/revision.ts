@@ -7,8 +7,11 @@ import { lireNotionsRevision } from './core/notionsRevision';
 import { dansPerimetre, type Perimetre } from './core/seance';
 import { aujourdhui } from './core/texte';
 import { estARevoir } from './core/repetition';
-import { coffreActuel, obtenirCoffre, reglages } from './config';
+import { coffreActuel, compilateur, obtenirCoffre, reglages } from './config';
 import { EcranSeance } from './vues/ecranSeance';
+import { compilateurDisponible, creerAtelier } from './code';
+import { listerExercices } from './core/exercicesCode';
+import type { ModeCode } from './core/exercices';
 import { accepterDefinitionsIA, clientIA } from './ia';
 import { creerCorrecteur } from './core/correctionIA';
 import { lirePistesCoffre } from './core/pistes';
@@ -23,7 +26,7 @@ function perimetreDepuis(coffre: string, uri?: vscode.Uri): Perimetre {
   return { type: 'tout' };
 }
 
-export async function lancerRevision(context: vscode.ExtensionContext, uri: vscode.Uri | undefined, surFin: () => void): Promise<void> {
+export async function lancerRevision(context: vscode.ExtensionContext, journal: vscode.OutputChannel, uri: vscode.Uri | undefined, surFin: () => void): Promise<void> {
   const coffre = await obtenirCoffre();
   if (!coffre) return;
   const perimetre = perimetreDepuis(coffre, uri instanceof vscode.Uri ? uri : undefined);
@@ -37,8 +40,12 @@ export async function lancerRevision(context: vscode.ExtensionContext, uri: vsco
   const client = await clientIA(context, false);
   const pistesAValider = perimetre.type === 'notion' ? 0 : lirePistesCoffre(coffre).filter((p) => p.statut === 'a_valider' && (perimetre.type === 'tout' || p.prosit === perimetre.nom)).length;
   const cible = perimetre.type === 'tout' ? '' : ` — ${perimetre.nom}`;
+  // Exercices de code : il faut un compilateur, et l'IA ou des exercices déjà générés
+  const compilateurOk = await compilateurDisponible();
+  const exercicesEnStock = listerExercices(coffre).filter((e) => e.statut !== 'reussi').length;
+  const codePossible = compilateurOk && (!!client || exercicesEnStock > 0);
 
-  type Choix = vscode.QuickPickItem & { rapide: boolean; entrainement: boolean };
+  type Choix = vscode.QuickPickItem & { rapide: boolean; entrainement: boolean; code?: ModeCode };
   const choix: Choix[] = [];
   if (aRevoir > 0 || (client && pistesAValider > 0)) {
     choix.push(
@@ -51,8 +58,23 @@ export async function lancerRevision(context: vscode.ExtensionContext, uri: vsco
           : 'Ajoute ta clé DeepSeek (« Forge : Configurer la clé DeepSeek ») pour que l\'IA corrige tes explications et tes pistes',
         rapide: false,
         entrainement: false,
+        code: 'parfois',
       },
     );
+  }
+  if (codePossible) {
+    choix.push({
+      label: '💻 Séance code',
+      description: 'écrire du C++, trouver des bugs, prédire la sortie',
+      detail: client
+        ? 'Exercices compilés et testés avec ton compilateur · générés par l\'IA, puis vérifiés par Forge'
+        : `${exercicesEnStock} exercice(s) déjà prêts (ajoute ta clé DeepSeek pour en générer d'autres)`,
+      rapide: false,
+      entrainement: aRevoir === 0,
+      code: 'surtout',
+    });
+  } else if (!compilateurOk) {
+    choix.push({ label: '💻 Séance code', description: 'indisponible', detail: `Compilateur « ${compilateur()} » introuvable : lance « Forge : Vérifier l'installation »`, rapide: false, entrainement: false, code: undefined });
   }
   choix.push({
     label: '🏋️ Entraînement libre',
@@ -64,6 +86,10 @@ export async function lancerRevision(context: vscode.ExtensionContext, uri: vsco
 
   const choisi = await vscode.window.showQuickPick(choix, { title: `🌱 Réviser${cible}`, placeHolder: 'Quel type de séance ?' });
   if (!choisi) return;
+  if (choisi.label === '💻 Séance code' && !choisi.code) {
+    vscode.commands.executeCommand('forge.verifierInstallation');
+    return;
+  }
   EcranSeance.ouvrir(
     coffre,
     {
@@ -72,6 +98,8 @@ export async function lancerRevision(context: vscode.ExtensionContext, uri: vsco
       perimetre,
       verifierDefinitions: !accepterDefinitionsIA(),
       ia: client ? creerCorrecteur(client) : undefined,
+      code: codePossible ? choisi.code ?? 'jamais' : 'jamais',
+      atelier: codePossible ? creerAtelier(coffre, client, journal) : undefined,
     },
     surFin,
   );

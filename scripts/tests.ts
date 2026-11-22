@@ -5,7 +5,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { memeNotion, nomDepuisAav, nomFichierSur, notionPresenteDans } from '../src/core/texte';
-import { versCheminWsl } from '../src/systeme';
+import { argumentsPour, versCheminWsl } from '../src/systeme';
 import type { CerAnalyse } from '../src/core/parseurCer';
 import { construirePlan, resoudreFusions } from '../src/core/planImport';
 import { decalerTitres, ecrirePlan, lireBloc, remplacerBloc } from '../src/core/ecritureCoffre';
@@ -64,6 +64,9 @@ test('conversion des chemins pour WSL', () => {
   assert.equal(versCheminWsl('C:\\Users\\moi\\SecondCerveau\\a.cpp'), '/mnt/c/Users/moi/SecondCerveau/a.cpp');
   assert.equal(versCheminWsl('\\\\wsl$\\Ubuntu\\home\\moi\\x'), '/home/moi/x');
   assert.equal(versCheminWsl('\\\\wsl.localhost\\Ubuntu\\home\\moi'), '/home/moi');
+  assert.deepEqual(argumentsPour('wsl', ['g++', "/mnt/c/L'arène (2)/a.cpp"]), ['-e', 'g++', "/mnt/c/L'arène (2)/a.cpp"]);
+  assert.deepEqual(argumentsPour('wsl', ['-e', 'ls']), ['-e', 'ls']);
+  assert.deepEqual(argumentsPour('g++', ['a.cpp']), ['a.cpp']);
 });
 
 test('décalage des titres sans toucher au code', () => {
@@ -212,21 +215,21 @@ test('séance : la réussite fait pousser et est enregistrée, l’échec revien
   const coffre = coffreAvecNotions();
   const seance = new Seance(coffre, { rapide: true, entrainement: false, perimetre: { type: 'tout' } }, hasardFixe(), aujourdhui());
   assert.equal(seance.aRevoir().length, 5);
-  const premier = seance.suivant()!;
+  const premier = (await seance.suivant())!;
   const bonne = premier.exercice.options ? { type: 'option' as const, index: premier.exercice.bonneOption! } : { type: 'texte' as const, valeur: premier.exercice.attendu! };
   const r = await seance.repondre(bonne);
   assert.equal(r.changement?.apres, 1);
   assert.match(fs.readFileSync(premier.notion!.chemin, 'utf8'), /niveau: 1[\s\S]*maitrise\/1/);
 
-  const second = seance.suivant()!;
+  const second = (await seance.suivant())!;
   await seance.repondre({ type: 'jeNeSaisPas' });
   const restants = seance.restants();
   assert.equal(restants, 4, 'la notion ratée est remise dans la file');
   // Revue une 2e fois dans la journée : entraînement, plus de changement de niveau
-  let x = seance.suivant();
+  let x = (await seance.suivant());
   while (x && x.notion!.chemin !== second.notion!.chemin) {
     await seance.repondre({ type: 'jeNeSaisPas' });
-    x = seance.suivant();
+    x = (await seance.suivant());
   }
   assert.ok(x);
   assert.equal((await seance.repondre({ type: 'jeNeSaisPas' })).compte, false);
@@ -401,7 +404,7 @@ test('séance avec IA : explications corrigées, pistes validées et écrites da
   assert.equal(seance.pistesAProposer().length, 1, 'la piste à valider est proposée');
   let vuPiste = false;
   let vuExplication = false;
-  for (let x = seance.suivant(); x; x = seance.suivant()) {
+  for (let x = (await seance.suivant()); x; x = (await seance.suivant())) {
     const e = x.exercice;
     if (e.type === 'piste_valider') {
       vuPiste = true;
@@ -431,10 +434,10 @@ test('séance hors ligne : vrai/faux sur une piste validée, pas de piste à val
   assert.equal(new Seance(coffre, { rapide: false, entrainement: false, perimetre: { type: 'tout' } }).pistesAProposer().length, 0);
   enregistrerPiste(piste.chemin, 0, 'partielle', 'Vrai pour le dynamique');
   const seance = new Seance(coffre, { rapide: true, entrainement: false, perimetre: { type: 'tout' } }, hasardFixe());
-  let x = seance.suivant();
+  let x = (await seance.suivant());
   while (x && x.exercice.type !== 'piste_vf') {
     await seance.repondre({ type: 'jeNeSaisPas' });
-    x = seance.suivant();
+    x = (await seance.suivant());
   }
   assert.ok(x, 'la piste validée est proposée en vrai/faux');
   const r = await seance.repondre({ type: 'piste', statut: 'validee', justification: '' });
@@ -446,10 +449,10 @@ test('séance : une erreur de l’IA ne casse pas la séance', async () => {
   const coffre = coffreAvecNotions();
   const enPanne: CorrecteurIA = { explication: async () => { throw new Error('réseau coupé'); }, piste: async () => { throw new Error('réseau coupé'); } };
   const seance = new Seance(coffre, { rapide: false, entrainement: true, perimetre: { type: 'tout' }, ia: enPanne }, hasardFixe(3));
-  let x = seance.suivant();
+  let x = (await seance.suivant());
   while (x && x.exercice.type !== 'piste_valider') {
     await seance.repondre({ type: 'jeNeSaisPas' });
-    x = seance.suivant();
+    x = (await seance.suivant());
   }
   const r = await seance.repondre({ type: 'piste', statut: 'validee', justification: 'j' });
   assert.equal(r.correction.resultat, null);
@@ -460,9 +463,146 @@ test('séance : une erreur de l’IA ne casse pas la séance', async () => {
 test('les scripts des webviews sont du JavaScript valide', async () => {
   const { html: htmlSeance } = await import('../src/vues/ecranSeance');
   const { html: htmlImport } = await import('../src/vues/ecranImport');
-  for (const page of [htmlSeance({ cspSource: 'x' }), htmlImport({ cspSource: 'x' }, { prosits: [], notions: [] })]) {
+  const { html: htmlPapier } = await import('../src/vues/ecranPapier');
+  for (const page of [htmlSeance({ cspSource: 'x' }), htmlImport({ cspSource: 'x' }, { prosits: [], notions: [] }), htmlPapier({ cspSource: 'x' })]) {
     const script = page.match(/<script nonce="[^"]+">([\s\S]*?)<\/script>/)?.[1];
     assert.ok(script, 'script trouvé');
     assert.doesNotThrow(() => new Function(script!), 'erreur de syntaxe dans le script de la webview');
   }
+});
+
+// --------------------------------------------------------------------------
+// Phase 4 : exercices de code, compilation, étude de cas
+
+import { spawnSync } from 'child_process';
+import { analyserErreursGpp, analyserSortieTests } from '../src/core/compilation';
+import { codeSur, ExerciceImpossible, exerciceExistant, genererExerciceCode, lireExercice } from '../src/core/exercicesCode';
+import { corrigerEtude, enregistrerEtude, genererEtude } from '../src/core/etudeDeCas';
+
+const gppDispo = spawnSync('g++', ['--version']).status === 0;
+const cfgGpp = { compilateur: 'g++', delaiExecutionMs: 3000 };
+
+/** Fausse IA qui renvoie, dans l'ordre, les réponses données (et retient les demandes). */
+function iaScriptee(reponses: unknown[]) {
+  const demandes: string[] = [];
+  const client: ClientIA = { json: async (_s, u) => { demandes.push(u); return reponses[Math.min(demandes.length - 1, reponses.length - 1)]; } };
+  return { client, demandes };
+}
+
+test('compilation : lecture des erreurs g++ et des résultats de tests', () => {
+  const e = analyserErreursGpp("/mnt/c/x/exercice.cpp:12:5: error: 'y' was not declared in this scope\n/mnt/c/x/exercice.cpp:3:1: warning: unused [-Wunused]\nIn file included from tests.cpp:2:");
+  assert.deepEqual(e.map((x) => [x.fichier, x.ligne, x.gravite]), [['exercice.cpp', 12, 'error'], ['exercice.cpp', 3, 'warning']]);
+  const t = analyserSortieTests('coucou\nFORGE_OK|a|\nFORGE_ECHEC|b|attendu : 2 ; obtenu : 3\nFORGE_BILAN|1|2');
+  assert.deepEqual([t.reussis, t.total, t.bilanTrouve, t.sortie], [1, 2, true, 'coucou']);
+  assert.equal(t.tests[1].detail, 'attendu : 2 ; obtenu : 3');
+});
+
+test('sécurité : le code généré qui touche au système est refusé', () => {
+  assert.ok(codeSur('#include <iostream>\nint f() { return 1; }'));
+  assert.ok(!codeSur('int main() { system("rm -rf /"); }'));
+  assert.ok(!codeSur('#include <fstream>'));
+  assert.ok(!codeSur('std::filesystem::remove_all(p);'));
+});
+
+const DEPART = 'int carre(int x) {\n  // TODO\n  return 0;\n}\n';
+const SOLUTION_FAUSSE = 'int carre(int x) { return x + x; }\n';
+const SOLUTION = 'int carre(int x) { return x * x; }\n';
+const TESTS = '#include "forge_test.hpp"\n#include "exercice.cpp"\nint main() {\n  VERIFIE_EGAL(carre(3), 9, "carre(3)");\n  VERIFIE_EGAL(carre(-2), 4, "carre(-2)");\n  return forge::bilan();\n}\n';
+
+test('exercice de code : une solution fausse de l’IA est détectée, puis corrigée', { skip: !gppDispo }, async () => {
+  const coffre = coffreAvecNotions();
+  const notion = lireNotionsRevision(coffre).find((n) => n.nom === 'Template')!;
+  const base = { titre: 'Carré', enonce: 'Écris `carre`.', exercice_cpp: DEPART, tests_cpp: TESTS, indices: ['Multiplie.'] };
+  const { client, demandes } = iaScriptee([{ ...base, solution_cpp: SOLUTION_FAUSSE }, { ...base, solution_cpp: SOLUTION }]);
+  const e = await genererExerciceCode(coffre, client, cfgGpp, { titre: 'Template', notions: [notion], contexte: '' }, 'code');
+  assert.equal(demandes.length, 2);
+  assert.match(demandes[1], /ne passe pas ces tests/);
+  assert.equal(fs.readFileSync(path.join(e.dossier, 'exercice.cpp'), 'utf8'), DEPART);
+  assert.equal(fs.readFileSync(path.join(e.dossier, '.solution', 'exercice.cpp'), 'utf8'), SOLUTION);
+  const relu = lireExercice(e.dossier);
+  assert.deepEqual([relu.genre, relu.titre, relu.statut, relu.indices], ['code', 'Carré', 'a_faire', ['Multiplie.']]);
+  assert.equal(relu.enonce, 'Écris `carre`.');
+  assert.equal(exerciceExistant(coffre, 'Template', 'code')?.dossier, e.dossier);
+});
+
+test('exercice de code : départ qui passe déjà les tests, ou code dangereux → refusés', { skip: !gppDispo }, async () => {
+  const coffre = coffreAvecNotions();
+  const notion = lireNotionsRevision(coffre)[0];
+  const cible = { titre: 'x', notions: [notion], contexte: '' };
+  const { client } = iaScriptee([{ titre: 't', enonce: 'e', exercice_cpp: SOLUTION, solution_cpp: SOLUTION, tests_cpp: TESTS }]);
+  await assert.rejects(genererExerciceCode(coffre, client, cfgGpp, cible, 'code', { essais: 1 }), /passe déjà tous les tests/);
+  const dangereux = iaScriptee([{ titre: 't', enonce: 'e', exercice_cpp: 'int f(){ system("ls"); return 0; }', solution_cpp: SOLUTION, tests_cpp: TESTS }]);
+  await assert.rejects(genererExerciceCode(coffre, dangereux.client, cfgGpp, cible, 'code', { essais: 1 }), /interdites/);
+  await assert.rejects(genererExerciceCode(coffre, iaScriptee([{ impossible: true, raison: 'notion théorique' }]).client, cfgGpp, cible, 'code'), ExerciceImpossible);
+});
+
+const PROGRAMME = '#include <iostream>\nstruct A { virtual void f() { std::cout << "A\\n"; } };\nstruct B : A { void f() override { std::cout << "B\\n"; } };\nint main() { B b; A a = b; a.f(); A& r = b; r.f(); }\n';
+
+test('prédis la sortie : la vraie sortie fait foi, l’IA doit l’avoir prévue', { skip: !gppDispo }, async () => {
+  const coffre = coffreAvecNotions();
+  const notion = lireNotionsRevision(coffre).find((n) => n.nom === 'Polymorphisme')!;
+  const { client, demandes } = iaScriptee([
+    { titre: 'Slicing', programme_cpp: PROGRAMME, sortie_attendue: 'B\nB', explication: 'faux' },
+    { titre: 'Slicing', programme_cpp: PROGRAMME, sortie_attendue: 'A\nB', explication: 'La copie `a` est un vrai A (slicing).' },
+  ]);
+  const e = await genererExerciceCode(coffre, client, cfgGpp, { titre: 'Polymorphisme', notions: [notion], contexte: '' }, 'sortie');
+  assert.match(demandes[1], /affiche réellement :\\nA\\nB/);
+  assert.equal(e.sortieAttendue, 'A\nB\n');
+  assert.match(e.programme ?? '', /A a = b/);
+
+  // Dans une séance : réussite si la prédiction est exacte (espaces ignorés)
+  const atelier = { preparer: async () => e };
+  const seance = new Seance(coffre, { rapide: false, entrainement: true, perimetre: { type: 'notion', nom: 'Polymorphisme' }, code: 'surtout', atelier }, hasardFixe());
+  const x = (await seance.suivant())!;
+  assert.equal(x.exercice.type, 'sortie');
+  assert.equal((await seance.repondre({ type: 'texte', valeur: ' A \nB\n' })).correction.resultat, 'reussite');
+});
+
+test('séance code : exercice réussi = preuve « code », même en entraînement', async () => {
+  const coffre = coffreAvecNotions();
+  const notions = lireNotionsRevision(coffre);
+  const poly = notions.find((n) => n.nom === 'Polymorphisme')!;
+  // Notion AAV [3] : exercices d'écriture de code possibles
+  const { data, content } = lireNote(poly.chemin);
+  data.aav_cible = 3;
+  (await import('../src/core/coffre')).ecrireNote(poly.chemin, data, content);
+  const faux = { dossier: coffre, genre: 'code' as const, titre: 'T', enonce: 'E', indices: [], notions: ['Polymorphisme'], statut: 'a_faire' as const, tentatives: 0 };
+  fs.writeFileSync(path.join(coffre, 'enonce.md'), '---\ntype: exercice\n---\n# T\n');
+  const seance = new Seance(coffre, { rapide: false, entrainement: true, perimetre: { type: 'notion', nom: 'Polymorphisme' }, code: 'surtout', atelier: { preparer: async (_n, g) => ({ ...faux, genre: g }) } }, hasardFixe(5));
+  let x = (await seance.suivant())!;
+  while (x.exercice.type === 'sortie') {
+    await seance.repondre({ type: 'texte', valeur: '' });
+    x = (await seance.suivant())!;
+  }
+  assert.ok(['code', 'bug'].includes(x.exercice.type));
+  await seance.repondre({ type: 'code', reussi: true });
+  assert.match(fs.readFileSync(poly.chemin, 'utf8'), /preuves:\n\s+code: 1/);
+  assert.match(fs.readFileSync(path.join(coffre, 'enonce.md'), 'utf8'), /statut: reussi/);
+});
+
+test('étude de cas : barème ramené à 20, copie vide = 0, preuves si la moyenne', async () => {
+  const coffre = coffreAvecNotions();
+  const notions = lireNotionsRevision(coffre);
+  const sujet = iaScriptee([{ titre: 'Zoo', contexte: 'Un zoo', questions: [
+    { numero: 1, enonce: 'Écris la classe Animal', type: 'code', points: 6, corrige: '```cpp\nclass Animal {};\n```', criteres: ['virtual'] },
+    { numero: 2, enonce: 'Pourquoi virtual ?', type: 'texte', points: 4, corrige: 'Liaison dynamique', criteres: [] },
+  ] }]);
+  const etude = await genererEtude(sujet.client, { titre: 'P04', contexte: 'Jeu', problematique: '?', notions }, 30);
+  assert.deepEqual(etude.questions.map((q) => q.points), [12, 8]);
+  const correction = await corrigerEtude(iaScriptee([{ questions: [{ numero: 1, points: 15, commentaire: 'Très bien' }, { numero: 2, points: 5, commentaire: '?' }], appreciation: 'Bien' }]).client, etude, ['class Animal { virtual ~Animal(); };', '']);
+  assert.deepEqual(correction.questions.map((q) => q.points), [12, 0], 'plafonné au barème ; vide = 0');
+  assert.equal(correction.note, 12);
+  const chemin = enregistrerEtude(coffre, 'P04 - Titre 4', etude, ['class Animal { virtual ~Animal(); };', ''], correction, notions, 25);
+  assert.match(fs.readFileSync(chemin, 'utf8'), /Note : 12\/20[\s\S]*Ma copie[\s\S]*class Animal/);
+  assert.match(fs.readFileSync(notions[0].chemin, 'utf8'), /papier: 1[\s\S]*long: 1|long: 1[\s\S]*papier: 1/);
+});
+
+test('compilation : dossier dont le nom contient des espaces', { skip: !gppDispo }, async () => {
+  const { lancerTests } = await import('../src/core/compilation');
+  const dossier = path.join(coffreTemporaire(), '2026-11-22 Mon exercice (2)');
+  fs.mkdirSync(dossier);
+  fs.writeFileSync(path.join(dossier, 'exercice.cpp'), SOLUTION);
+  fs.writeFileSync(path.join(dossier, 'tests.cpp'), TESTS);
+  const r = await lancerTests(cfgGpp, dossier);
+  assert.deepEqual([r.compile, r.reussis, r.total, r.plante], [true, 2, 2, false]);
 });

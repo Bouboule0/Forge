@@ -8,6 +8,9 @@ import type { NotionRevision } from '../core/notionsRevision';
 import { texteBrut } from '../core/exercices';
 import { stade } from '../core/repetition';
 import { Seance, type OptionsSeance, type ResultatReponse } from '../core/seance';
+import { cheminSolution, FICHIER_EXERCICE } from '../core/exercicesCode';
+import { resumeTests, verifierExercice } from '../verificationCode';
+import * as path from 'path';
 
 const sansLiens = (md: string) => md.replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, '$2').replace(/!?\[\[([^\]]+)\]\]/g, '$1');
 const echapper = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -39,6 +42,15 @@ export class EcranSeance {
   private occupe = false;
   private readonly abonnements: vscode.Disposable[] = [];
 
+  /** Commande « Vérifier l'exercice » : si c'est l'exercice de la séance, c'est la séance qui vérifie. */
+  static verifierSiEnCours(dossier: string): boolean {
+    const a = EcranSeance.actuel;
+    if (!a || a.seance.enCours?.exercice.code?.dossier !== dossier) return false;
+    a.panneau.reveal(undefined, true);
+    void a.verifierCode();
+    return true;
+  }
+
   static ouvrir(coffre: string, options: OptionsSeance, surFin: () => void): void {
     if (EcranSeance.actuel) {
       EcranSeance.actuel.panneau.reveal();
@@ -61,7 +73,7 @@ export class EcranSeance {
 
   private recommencer(options: OptionsSeance): void {
     this.seance = new Seance(this.coffre, options);
-    this.envoyerSuivant();
+    void this.envoyerSuivant();
   }
 
   private envoyer(message: unknown): void {
@@ -73,8 +85,11 @@ export class EcranSeance {
     return { faits: b.faits, reussis: b.reussis, restants: this.seance.restants(), entrainement: this.seance.enEntrainement, ia: !!this.seance.options.ia };
   }
 
-  private envoyerSuivant(): void {
-    const suivant = this.seance.suivant();
+  private async envoyerSuivant(): Promise<void> {
+    // La préparation d'un exercice de code peut prendre du temps (l'IA écrit, Forge compile)
+    const attente = setTimeout(() => this.envoyer({ type: 'chargement', message: "🤖 Préparation d'un exercice de code : l'IA l'écrit, puis Forge le compile pour le vérifier (jusqu'à une minute)" }), 400);
+    const suivant = await this.seance.suivant();
+    clearTimeout(attente);
     if (!suivant) {
       this.envoyerFin();
       return;
@@ -96,8 +111,63 @@ export class EcranSeance {
         // La vérification montre directement la définition à relire
         definitions: e.type === 'verification' && notion ? definitionsHtml(notion) : undefined,
         problematique: piste?.problematique ? texteHtml(texteSimple(piste.problematique)) : undefined,
+        code: e.code
+          ? {
+              genre: e.code.genre,
+              enonce: enBloc(e.code.enonce),
+              programme: e.code.programme ? echapper(e.code.programme) : undefined,
+              indices: e.code.indices.map(enLigne),
+              tentatives: e.code.tentatives,
+            }
+          : undefined,
       },
     });
+    // Exercice à écrire dans l'éditeur : on l'ouvre directement à côté
+    if (e.code && e.code.genre !== 'sortie') await this.ouvrirExercice();
+  }
+
+  private async ouvrirExercice(): Promise<void> {
+    const code = this.seance.enCours?.exercice.code;
+    if (!code) return;
+    await vscode.window.showTextDocument(vscode.Uri.file(path.join(code.dossier, FICHIER_EXERCICE)), { viewColumn: vscode.ViewColumn.Beside, preview: false });
+  }
+
+  private async voirSolution(): Promise<void> {
+    const code = this.dernierExercice?.code ?? this.seance.enCours?.exercice.code;
+    if (!code) return;
+    await vscode.window.showTextDocument(vscode.Uri.file(cheminSolution(code)), { viewColumn: vscode.ViewColumn.Beside, preview: true });
+  }
+
+  /** Compile et teste l'exercice en cours ; s'il est réussi, la réponse est enregistrée. */
+  async verifierCode(): Promise<void> {
+    const courant = this.seance.enCours;
+    const code = courant?.exercice.code;
+    if (!courant || !code || this.occupe) return;
+    this.occupe = true;
+    try {
+      this.envoyer({ type: 'verificationEnCours' });
+      const r = await verifierExercice(code.dossier);
+      this.envoyer({
+        type: 'resultatTests',
+        resultat: {
+          resume: resumeTests(r),
+          compile: r.compile,
+          sortieCompilation: r.compile ? '' : echapper(r.sortieCompilation.slice(0, 4000)),
+          tests: r.tests.map((t) => ({ nom: echapper(t.nom), ok: t.ok, detail: echapper(t.detail) })),
+          sortie: echapper(r.sortie.slice(0, 2000)),
+          reussi: r.compile && !r.plante && !r.delaiDepasse && r.total > 0 && r.reussis === r.total,
+        },
+      });
+      if (r.compile && !r.plante && !r.delaiDepasse && r.total > 0 && r.reussis === r.total) {
+        this.dernierExercice = courant.exercice;
+        const reponse = await this.seance.repondre({ type: 'code', reussi: true });
+        this.dernier = reponse;
+        this.envoyerCorrection(reponse);
+        this.surFin();
+      }
+    } finally {
+      this.occupe = false;
+    }
   }
 
   private envoyerCorrection(r: ResultatReponse): void {
@@ -119,6 +189,11 @@ export class EcranSeance {
         definitions: r.notion ? definitionsHtml(r.notion) : undefined,
         // Pour une piste déjà validée, on rappelle la justification du CER
         justificationCer: exercice?.type === 'piste_vf' && r.piste?.justification ? enLigne(r.piste.justification) : undefined,
+        estCode: !!exercice?.code,
+        tentatives: exercice?.code?.tentatives,
+        // Prédis la sortie : vraie sortie + explication
+        sortieAttendue: exercice?.code?.genre === 'sortie' ? echapper(exercice.code.sortieAttendue ?? '') : undefined,
+        explication: exercice?.code?.genre === 'sortie' && exercice.code.explication ? enBloc(exercice.code.explication) : undefined,
         ia: ia
           ? {
               note: ia.note,
@@ -166,7 +241,16 @@ export class EcranSeance {
   private async recevoir(m: { type: string; reponse?: Reponse }): Promise<void> {
     switch (m.type) {
       case 'pret':
-        this.envoyerSuivant();
+        await this.envoyerSuivant();
+        break;
+      case 'ouvrirExercice':
+        await this.ouvrirExercice();
+        break;
+      case 'verifierCode':
+        await this.verifierCode();
+        break;
+      case 'voirSolution':
+        await this.voirSolution();
         break;
       case 'reponse': {
         if (!m.reponse || this.occupe) return;
@@ -179,10 +263,11 @@ export class EcranSeance {
           const verifCorriger = m.reponse.type === 'verification' && m.reponse.choix === 'corriger';
           const r = await this.seance.repondre(m.reponse);
           this.dernier = r;
+          if (m.reponse.type === 'code' && !m.reponse.reussi) await this.voirSolution();
           if (verifCorriger && r.notion) {
             await vscode.window.showTextDocument(vscode.Uri.file(r.notion.chemin), { viewColumn: vscode.ViewColumn.Beside, preview: false });
           }
-          if (r.correction.resultat === null && !r.correction.erreur) this.envoyerSuivant();
+          if (r.correction.resultat === null && !r.correction.erreur) await this.envoyerSuivant();
           else this.envoyerCorrection(r);
           this.surFin();
         } finally {
@@ -203,7 +288,7 @@ export class EcranSeance {
         break;
       case 'suivant':
         this.dernier = undefined;
-        this.envoyerSuivant();
+        await this.envoyerSuivant();
         break;
       case 'ouvrirNote': {
         const chemin = this.cheminCourant();
@@ -302,6 +387,15 @@ export function html(webview: Pick<vscode.Webview, 'cspSource'>): string {
   .retour-ia ul { margin: 4px 0 8px; padding-left: 20px; }
   .cer { margin: 10px 0; padding: 10px 14px; border-radius: 6px; border: 1px dashed var(--vscode-panel-border); }
   button:disabled { opacity: .5; cursor: default; }
+  pre.code, textarea.mono { font-family: var(--vscode-editor-font-family); font-size: 13px; }
+  pre.code { padding: 10px 12px; overflow-x: auto; background: var(--vscode-textCodeBlock-background); border-radius: 6px; }
+  .enonce-code { margin: 8px 0 12px; }
+  .enonce-code pre { overflow-x: auto; padding: 8px; background: var(--vscode-textCodeBlock-background); }
+  ul.tests { list-style: none; padding: 0; margin: 6px 0; }
+  ul.tests li { padding: 2px 0; }
+  ul.tests .detail { color: var(--vscode-descriptionForeground); font-size: 12px; margin-left: 24px; }
+  .deux { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .deux h4 { margin: 6px 0; }
 </style>
 </head>
 <body>
@@ -373,6 +467,22 @@ function afficherExercice(e) {
   } else if (e.type === 'piste_vf') {
     corps += '<div class="piste">« ' + e.enonce + ' »</div>' +
       '<div class="statuts">' + STATUTS.map((x, i) => '<button class="statut" data-statut="' + x[0] + '"><span class="touche">' + (i + 1) + '</span> ' + x[1] + '</button>').join('') + '</div>';
+  } else if (e.code && e.code.genre === 'sortie') {
+    corps += '<pre class="code">' + e.code.programme + '</pre>' +
+      '<textarea id="saisie" class="mono" spellcheck="false" placeholder="Ce que le programme affiche, ligne par ligne…"></textarea>' +
+      '<div class="actions"><button class="principal" id="validerSortie">Valider</button>' +
+      '<button class="lien" id="nsp">Je ne sais pas</button></div>';
+  } else if (e.code) {
+    corps += '<div class="enonce-code">' + e.code.enonce + '</div>' +
+      (e.code.tentatives ? '<p class="indice">Déjà ' + e.code.tentatives + ' tentative(s) sur cet exercice.</p>' : '') +
+      '<div id="indices"></div>' +
+      '<div class="actions">' +
+        '<button class="principal" id="verifierCode">▶️ Vérifier</button>' +
+        '<button class="secondaire" id="ouvrirExercice">📂 Ouvrir le code</button>' +
+        (e.code.indices.length ? '<button class="secondaire" id="indiceCode">💡 Indice</button>' : '') +
+        '<button class="lien" id="abandonner">🏳️ Voir la correction</button>' +
+      '</div><div id="resultatTests"></div>' +
+      '<p class="indice">Code dans l\\'éditeur à droite, puis ▶️ Vérifier (ou <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>V</kbd> depuis l\\'éditeur).</p>';
   } else if (e.type === 'verification') {
     corps += '<div class="enonce">' + e.enonce + '</div><div class="definition">' + e.definitions + '</div>' +
       '<div class="actions"><button class="principal" data-verif="juste">✅ Elle est juste</button>' +
@@ -388,6 +498,19 @@ function afficherExercice(e) {
   lier('reveler', () => envoyer({ type: 'reveler' }));
   zone.querySelectorAll('.option').forEach((b) => b.onclick = () => { choisi = Number(b.dataset.i); repondre({ type: 'option', index: choisi }); });
   zone.querySelectorAll('[data-verif]').forEach((b) => b.onclick = () => repondre({ type: 'verification', choix: b.dataset.verif }));
+
+  // Exercices de code
+  lier('ouvrirExercice', () => envoyer({ type: 'ouvrirExercice' }));
+  lier('verifierCode', () => envoyer({ type: 'verifierCode' }));
+  lier('abandonner', () => repondre({ type: 'code', reussi: false }));
+  lier('validerSortie', () => repondre({ type: 'texte', valeur: saisie.value }));
+  let indicesMontres = 0;
+  lier('indiceCode', () => {
+    if (indicesMontres >= e.code.indices.length) return;
+    document.getElementById('indices').insertAdjacentHTML('beforeend', '<div class="indice">💡 ' + e.code.indices[indicesMontres++] + '</div>');
+    if (indicesMontres >= e.code.indices.length) document.getElementById('indiceCode').disabled = true;
+  });
+  if (e.code && e.code.genre === 'sortie') lier('nsp', () => repondre({ type: 'texte', valeur: '' }));
 
   // Exercices corrigés par l'IA
   const envoyerIA = document.getElementById('envoyerIA');
@@ -413,6 +536,25 @@ function afficherExercice(e) {
     const nsp = document.getElementById('nsp');
     nsp.onclick = () => { if (e.type === 'piste_valider') attendreIA(); repondre({ type: 'jeNeSaisPas' }); };
   }
+}
+
+function afficherChargement(message) {
+  etat = 'attente';
+  zone.innerHTML = '<div class="attente">' + message + '</div>';
+}
+
+function afficherResultatTests(r) {
+  const zoneTests = document.getElementById('resultatTests');
+  if (!zoneTests) return;
+  let html = '<div class="retour-ia"><strong>' + r.resume + '</strong>';
+  if (!r.compile) html += '<pre class="code">' + r.sortieCompilation + '</pre><div class="indice">Les erreurs sont aussi soulignées dans l\\'éditeur.</div>';
+  if (r.tests.length) html += '<ul class="tests">' + r.tests.map((t) => '<li>' + (t.ok ? '✅ ' : '❌ ') + t.nom +
+    (!t.ok && t.detail ? '<div class="detail">' + t.detail + '</div>' : '') + '</li>').join('') + '</ul>';
+  if (r.sortie) html += '<details><summary>Ce que ton programme a affiché</summary><pre class="code">' + r.sortie + '</pre></details>';
+  html += '</div>';
+  zoneTests.innerHTML = html;
+  const bouton = document.getElementById('verifierCode');
+  if (bouton) { bouton.disabled = false; bouton.textContent = '▶️ Vérifier'; }
 }
 
 function attendreIA() {
@@ -468,6 +610,13 @@ function afficherCorrection(c) {
   if (c.solution) html += '<div class="enonce">' + c.solution + '</div>';
   else if (c.estPiste && c.bonneReponse) html += '<p>Bonne réponse : <strong>' + c.bonneReponse + '</strong></p>';
   else if (c.resultat === 'echec' && c.bonneReponse && !exercice.options) html += '<p>Réponse attendue : <strong>' + c.bonneReponse + '</strong></p>';
+  if (c.estCode && c.resultat === 'reussite' && !c.sortieAttendue) html += '<p>🎉 Exercice réussi' + (c.tentatives > 1 ? ' en ' + c.tentatives + ' tentatives' : '') + '. Compare avec la solution proposée : il y a souvent plusieurs bonnes façons de faire.</p>';
+  if (c.estCode && c.resultat === 'echec' && !c.sortieAttendue) html += '<p>La correction est ouverte à côté. Cet exercice te sera reproposé plus tard.</p>';
+  if (c.sortieAttendue !== undefined) {
+    html += '<div class="deux"><div><h4>Ta réponse</h4><pre class="code">' + (saisie ? saisie.value.replace(/</g, '&lt;') : '') + '</pre></div>' +
+            '<div><h4>Vraie sortie</h4><pre class="code">' + c.sortieAttendue + '</pre></div></div>';
+    if (c.explication) html += '<details open><summary>💡 Pourquoi ?</summary><div class="definition">' + c.explication + '</div></details>';
+  }
   if (c.justificationCer) html += '<div class="cer">📝 Justification de ton CER : ' + c.justificationCer + '</div>';
   if (c.ia) {
     let retour = '';
@@ -490,12 +639,14 @@ function afficherCorrection(c) {
   if (c.definitions && exercice.type !== 'verification' && exercice.type !== 'flashcard') html += '<details><summary>Voir la définition</summary><div class="definition">' + c.definitions + '</div></details>';
   html += '<div class="actions"><button class="principal" id="suivant">Suivant ➜</button>' +
           (c.peutRectifier ? '<button class="secondaire" id="rectifier">J\\'avais bon en fait</button>' : '') +
+          (c.estCode && !c.sortieAttendue ? '<button class="secondaire" id="voirSolution">📖 Solution proposée</button>' : '') +
           '<button class="lien" id="ouvrir">✏️ ' + (c.estPiste ? 'Ouvrir le Prosit' : 'Ouvrir la note') + '</button></div>';
   const bloc = document.createElement('div');
   bloc.innerHTML = html;
   zone.appendChild(bloc);
   lier('suivant', () => { etat = 'attente'; envoyer({ type: 'suivant' }); });
   lier('rectifier', () => envoyer({ type: 'rectifier' }));
+  lier('voirSolution', () => envoyer({ type: 'voirSolution' }));
   lier('ouvrir', () => envoyer({ type: 'ouvrirNote' }));
   document.getElementById('suivant').focus();
 }
@@ -530,6 +681,12 @@ window.addEventListener('message', (ev) => {
   if (m.progression) compteurs(m.progression);
   if (m.type === 'exercice') afficherExercice(m.exercice);
   if (m.type === 'revelation') afficherRevelation(m.definitions);
+  if (m.type === 'chargement') afficherChargement(m.message);
+  if (m.type === 'resultatTests') afficherResultatTests(m.resultat);
+  if (m.type === 'verificationEnCours') {
+    const b = document.getElementById('verifierCode');
+    if (b) { b.disabled = true; b.textContent = '🔨 Compilation…'; }
+  }
   if (m.type === 'correction') afficherCorrection(m.correction);
   if (m.type === 'fin') afficherFin(m.bilan, m.entrainement);
 });
@@ -539,7 +696,12 @@ document.getElementById('stop').onclick = () => envoyer({ type: 'stop' });
 document.addEventListener('keydown', (ev) => {
   if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey) && etat === 'exercice') {
     ev.preventDefault();
-    document.getElementById('envoyerIA')?.click();
+    (document.getElementById('envoyerIA') || document.getElementById('validerSortie'))?.click();
+    return;
+  }
+  if ((ev.key === 'v' || ev.key === 'V') && ev.ctrlKey && ev.altKey && etat === 'exercice') {
+    ev.preventDefault();
+    document.getElementById('verifierCode')?.click();
     return;
   }
   if (ev.key === 'Enter' && !ev.shiftKey) {

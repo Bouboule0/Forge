@@ -14,7 +14,7 @@ Le plan complet est dans [`docs/PLAN.md`](docs/PLAN.md).
 | 1. Import | Import des CER (.docx), écran de validation, nouveau Prosit, export Word | ✅ |
 | 2. Révision hors ligne | Texte à trous, QCM, répétition espacée, séances | ✅ |
 | 3. IA (DeepSeek) | Relecture des définitions, explications corrigées, pistes de solutions | ✅ |
-| 4. Code | Exercices C++ compilés et testés, mode papier | ⏳ |
+| 4. Code | Exercices C++ compilés et testés, prédis la sortie, trouve le bug, mini-projets, mode papier | ✅ |
 | 5. Ferme | Ferme pixel-art que tu aménages toi-même | ⏳ |
 | 6. Finitions | Mode examen (CCTL, étude de cas), statistiques, `.vsix` | ⏳ |
 
@@ -165,7 +165,7 @@ La séance dure **aussi longtemps que tu veux** (bouton « Terminer la séance �
 
 - Un **échec** fait perdre un niveau (deux à partir de 🌳), et la notion revient le lendemain. Elle revient aussi plus tard dans la même séance.
 - **Seule la première réponse du jour** compte ; les suivantes sont de l'entraînement.
-- Pour dépasser 🌳, il faut des exercices qui prouvent l'AAV : une explication réussie corrigée par l'IA, et du code pour un AAV [3] (phase 4)…
+- Pour dépasser 🌳, il faut des exercices qui prouvent l'AAV : une explication réussie corrigée par l'IA (AAV [2]), plus 2 exercices de code réussis (AAV [3]), plus un exercice long et une étude de cas sur papier (AAV [5]).
 
 ## 🤖 Définitions générées par IA
 
@@ -185,6 +185,36 @@ Ensuite, chaque import lance automatiquement la relecture des nouvelles définit
 
 > Tu préfères tout valider toi-même ? Mets `forge.definitionsIA` sur `verifier` : les séances complètes te proposeront alors « Vérifie la définition » pour chaque définition générée par IA.
 
+## 💻 Exercices de code C++
+
+Il faut une clé DeepSeek (pour générer les exercices) et un compilateur qui marche (« Forge : Vérifier l'installation » → ✅ Hello Forge).
+
+| Exercice | Ce que tu fais | Comment c'est vérifié |
+|---|---|---|
+| ⌨️ Exercice de code (5–10 min) | Compléter `exercice.cpp` (les `// TODO`) | Tests compilés et lancés par Forge |
+| 🐞 Trouve le bug | Un code compile mais se comporte mal : trouve et corrige | Tests |
+| 🧱 Mini-projet (20–40 min) | Plusieurs classes, dans l'histoire d'un Prosit | Tests |
+| 🔮 Prédis la sortie | Écrire ce qu'affiche un programme | La **vraie** sortie du programme compilé |
+
+**Où les faire :**
+- **Ctrl+Alt+R** → **💻 Séance code** (ou un peu dans la séance complète) ;
+- `Ctrl+Shift+P` → **Forge : Nouvel exercice de code** (au choix : notion, type, mini-projet sur un Prosit) ;
+- **Forge : Mes exercices de code** pour reprendre ou refaire un exercice.
+
+**Comment ça marche :** `exercice.cpp` s'ouvre dans l'éditeur. Tu codes avec toutes les aides de VS Code, puis **Ctrl+Alt+V** (ou ▶️ Vérifier) : Forge compile avec `wsl g++`, lance les tests et souligne les erreurs du compilateur dans l'éditeur. 💡 Indices et 🏳️ correction sont disponibles.
+
+**Exercices fiables :** avant de te donner un exercice, Forge le compile et vérifie que la solution de l'IA passe tous ses tests et que le code de départ échoue. Pour « prédis la sortie », la réponse attendue est la sortie réelle du programme. Si l'IA se trompe, Forge lui renvoie l'erreur pour qu'elle corrige (jusqu'à 3 essais).
+
+Chaque exercice est rangé dans `Exercices/<notion>/` : `enonce.md` (lisible dans Obsidian), `exercice.cpp`, `tests.cpp`, et la solution dans `.solution/`.
+
+> 🔒 **Sécurité** : le code écrit par l'IA est exécuté sur ta machine (dans WSL). Forge refuse le code qui touche aux fichiers ou au système (`system()`, `<fstream>`, `<filesystem>`…) et arrête tout programme au bout de 5 secondes.
+
+## 📝 Étude de cas sur papier
+
+`Ctrl+Shift+P` → **Forge : Étude de cas sur papier** : choisis un Prosit et une durée (20 min à 1 h). L'IA écrit un sujet d'examen (3 à 5 questions, barème sur 20). Tu réponds **comme sur papier** : chronomètre, pas de compilateur, pas d'autocomplétion. À la fin, l'IA corrige comme un correcteur d'examen (petites fautes de syntaxe tolérées, erreurs de conception pénalisées), question par question, avec le corrigé.
+
+Le sujet, ta copie et la correction sont enregistrés dans `Exercices/<Prosit>/`. Avec au moins 10/20, les notions du Prosit gagnent la preuve « papier » (et « exercice long » si l'épreuve dure 30 min ou plus).
+
 ## 🧭 Les commandes
 
 | Commande | Ce qu'elle fait |
@@ -199,6 +229,10 @@ Ensuite, chaque import lance automatiquement la relecture des nouvelles définit
 | Forge : Configurer la clé DeepSeek | Enregistre (ou supprime) ta clé API DeepSeek |
 | Forge : Faire relire les définitions par l'IA | Relit les définitions pas encore relues ; corrige les fausses, écrit les manquantes |
 | Forge : Faire relire toutes les définitions par l'IA | Pareil, même celles déjà relues |
+| Forge : Nouvel exercice de code | Exercice de code, trouve le bug ou mini-projet, généré puis vérifié |
+| Forge : Vérifier l'exercice | Compile et teste l'exercice ouvert (Ctrl+Alt+V) |
+| Forge : Mes exercices de code | Reprendre ou refaire un exercice |
+| Forge : Étude de cas sur papier | Épreuve chronométrée corrigée sur 20 |
 | Forge : Ouvrir le coffre dans VS Code | Ouvre le coffre dans une nouvelle fenêtre |
 
 ### Réglages (Ctrl+, puis cherche « forge »)
@@ -225,7 +259,7 @@ SecondCerveau/
 ├── Prosits/      P01 - La POO, quésaco.md, P02 - …
 ├── Notions/      Encapsulation.md, Polymorphisme.md, …
 ├── Modules/      Programmation orientée objet.md
-├── Exercices/    (phase 4)
+├── Exercices/    exercices de code et études de cas
 ├── Ressources/images/
 ├── Sources/      tes .docx d'origine
 ├── Exports/      CER générés en Word
@@ -253,7 +287,7 @@ npm run essai-import -- ./coffre-test chemin/vers/CER.docx
 
 | Dossier | Contenu |
 |---|---|
-| `src/core/` | Logique sans VS Code : import, écriture du coffre, export Word, répétition espacée, exercices, pistes, séance, corrections IA |
-| `src/vues/` | Webviews (écran de validation, écran de séance) |
+| `src/core/` | Logique sans VS Code : import, coffre, export Word, répétition espacée, exercices, pistes, séance, corrections IA, compilation, exercices de code, études de cas |
+| `src/vues/` | Webviews (écran de validation, séance, étude de cas sur papier) |
 | `src/extension.ts` | Commandes VS Code |
 | `scripts/` | Tests et essais en ligne de commande |
