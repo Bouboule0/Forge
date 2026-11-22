@@ -31,6 +31,7 @@ import { enregistrerPiste, ETIQUETTES_STATUT, lirePistesCoffre, type PisteRevisi
 import { ajouterJours, appliquerResultat, estARevoir, type Changement } from './repetition';
 import type { CorrecteurIA } from './correctionIA';
 import { aujourdhui, normaliser } from './texte';
+import { piecesGagnees } from './ferme';
 
 export type Perimetre = { type: 'tout' } | { type: 'prosit'; nom: string } | { type: 'notion'; nom: string };
 
@@ -79,6 +80,8 @@ export interface Bilan {
   descentes: Array<{ titre: string; avant: number; apres: number }>;
   verifiees: number;
   pistesValidees: number;
+  /** Pièces gagnées pendant la séance (ferme) */
+  pieces: number;
   restants: number;
   serie: number;
 }
@@ -112,8 +115,9 @@ export class Seance {
   private courant?: EnCours;
   private readonly date: string;
   private readonly hasard: Hasard;
-  readonly bilan: Bilan = { faits: 0, reussis: 0, echecs: 0, montees: [], descentes: [], verifiees: 0, pistesValidees: 0, restants: 0, serie: 0 };
+  readonly bilan: Bilan = { faits: 0, reussis: 0, echecs: 0, montees: [], descentes: [], verifiees: 0, pistesValidees: 0, pieces: 0, restants: 0, serie: 0 };
   private niveauxDepart = new Map<string, number>();
+  private piecesDepart = 0;
 
   constructor(
     private readonly coffre: string,
@@ -126,6 +130,7 @@ export class Seance {
     this.notions = lireNotionsRevision(coffre);
     this.pistes = lirePistesCoffre(coffre);
     for (const n of this.notions) this.niveauxDepart.set(n.chemin, n.etat.niveau);
+    this.piecesDepart = piecesGagnees(lireHistorique(coffre));
     this.remplirFile();
   }
 
@@ -344,7 +349,9 @@ export class Seance {
       if (n.etat.niveau < avant) this.bilan.descentes.push({ titre: n.titre, avant, apres: n.etat.niveau });
     }
     this.bilan.restants = this.aRevoir().length;
-    this.bilan.serie = serieDeJours(lireHistorique(this.coffre), this.date);
+    const historique = lireHistorique(this.coffre);
+    this.bilan.serie = serieDeJours(historique, this.date);
+    this.bilan.pieces = piecesGagnees(historique) - this.piecesDepart;
     return this.bilan;
   }
 }

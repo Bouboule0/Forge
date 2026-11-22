@@ -16,6 +16,7 @@ import { cheminPour, executer, passeParWsl } from './systeme';
 import { lancerRevision, suggererRevision } from './revision';
 import { etudeDeCas, mesExercices, nouvelExercice, verifierCommande } from './code';
 import { initialiserDiagnostics } from './verificationCode';
+import { EcranFerme } from './vues/ecranFerme';
 import { accepterDefinitionsIA, configurerCle, lancerRelecture } from './ia';
 
 let journal: vscode.OutputChannel;
@@ -84,11 +85,23 @@ export function activate(context: vscode.ExtensionContext): void {
   commande('forge.exporterWord', exporterWord);
   commande('forge.ouvrirCoffre', ouvrirCoffre);
   commande('forge.notionsARevoir', afficherNotionsARevoir);
-  commande('forge.reviser', (uri?: vscode.Uri) => lancerRevision(context, journal, uri, () => barre.actualiser()));
+  // Après une activité (séance, étude de cas…) : barre d'état et ferme à jour
+  const apresActivite = () => {
+    barre.actualiser();
+    EcranFerme.actualiser();
+  };
+  commande('forge.reviser', (uri?: vscode.Uri) => lancerRevision(context, journal, uri, apresActivite));
+  commande('forge.ferme', async () => {
+    const coffre = await obtenirCoffre();
+    if (!coffre) return;
+    EcranFerme.ouvrir(coffre, {
+      reviserNotion: (nom) => lancerRevision(context, journal, vscode.Uri.file(path.join(cheminDossier(coffre, 'notions'), `${nom}.md`)), apresActivite),
+    });
+  });
   commande('forge.nouvelExercice', () => nouvelExercice(context, journal));
   commande('forge.verifierExercice', (uri?: vscode.Uri) => verifierCommande(coffreActuel(), journal, uri));
   commande('forge.mesExercices', mesExercices);
-  commande('forge.etudeDeCas', () => etudeDeCas(context, () => barre.actualiser()));
+  commande('forge.etudeDeCas', () => etudeDeCas(context, apresActivite));
 
   context.subscriptions.push(
     barre,

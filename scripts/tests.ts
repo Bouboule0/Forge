@@ -464,7 +464,8 @@ test('les scripts des webviews sont du JavaScript valide', async () => {
   const { html: htmlSeance } = await import('../src/vues/ecranSeance');
   const { html: htmlImport } = await import('../src/vues/ecranImport');
   const { html: htmlPapier } = await import('../src/vues/ecranPapier');
-  for (const page of [htmlSeance({ cspSource: 'x' }), htmlImport({ cspSource: 'x' }, { prosits: [], notions: [] }), htmlPapier({ cspSource: 'x' })]) {
+  const { html: htmlFerme } = await import('../src/vues/ecranFerme');
+  for (const page of [htmlSeance({ cspSource: 'x' }), htmlImport({ cspSource: 'x' }, { prosits: [], notions: [] }), htmlPapier({ cspSource: 'x' }), htmlFerme({ cspSource: 'x' })]) {
     const script = page.match(/<script nonce="[^"]+">([\s\S]*?)<\/script>/)?.[1];
     assert.ok(script, 'script trouvé');
     assert.doesNotThrow(() => new Function(script!), 'erreur de syntaxe dans le script de la webview');
@@ -605,4 +606,94 @@ test('compilation : dossier dont le nom contient des espaces', { skip: !gppDispo
   fs.writeFileSync(path.join(dossier, 'tests.cpp'), TESTS);
   const r = await lancerTests(cfgGpp, dossier);
   assert.deepEqual([r.compile, r.reussis, r.total, r.plante], [true, 2, 2, false]);
+});
+
+// --------------------------------------------------------------------------
+// Phase 5 : la ferme
+
+import { acheter, deplacerDecoration, ErreurFerme, gainEntree, lireDisposition, niveauFermier, piecesGagnees, planter, saison, tailleFerme, toutPlanter, vueFerme } from '../src/core/ferme';
+import { DECORATIONS, PALETTE, STADES } from '../src/vues/fermeSprites';
+import { ajouterHistorique } from '../src/core/notionsRevision';
+
+const entree = (type: string, resultat: 'reussite' | 'moyen' | 'echec', extra: object = {}) => ({ date: '2026-11-22T10:00:00', notion: 'x', type, resultat, compte: true, ...extra });
+
+test('ferme : pièces gagnées en révisant, niveau de fermier, taille, saison', () => {
+  assert.equal(gainEntree(entree('trou', 'reussite')), 5);
+  assert.equal(gainEntree({ ...entree('trou', 'reussite'), compte: false }), 2);
+  assert.equal(gainEntree(entree('code', 'reussite')), 15);
+  assert.equal(gainEntree(entree('trou', 'reussite', { niveauAvant: 6 })), 25, 'récolte : +20');
+  assert.equal(gainEntree(entree('etude_de_cas', 'reussite', { points: 14.5 })), 29);
+  assert.equal(gainEntree(entree('qcm_notion', 'echec')), 0);
+  assert.deepEqual(niveauFermier(0), { niveau: 1, precedent: 0, prochain: 100 });
+  assert.equal(niveauFermier(300).niveau, 3);
+  assert.deepEqual(tailleFerme(1), { largeur: 12, hauteur: 8 });
+  assert.equal(saison('2026-11-22'), 'automne');
+  assert.equal(saison('2027-01-05'), 'hiver');
+});
+
+test('ferme : planter, acheter, déplacer, ranger ; pièces = gagnées − dépensées', () => {
+  const coffre = coffreAvecNotions();
+  for (let i = 0; i < 10; i++) ajouterHistorique(coffre, entree('trou', 'reussite'));
+  let vue = vueFerme(coffre);
+  assert.equal(vue.pieces, 50);
+  assert.equal(vue.plantes.filter((p) => p.x === null).length, 5, 'toutes les notions sont des graines');
+
+  planter(coffre, 'Template', 2, 2);
+  assert.throws(() => planter(coffre, 'Surcharge', 2, 2), ErreurFerme);
+  assert.throws(() => planter(coffre, 'Surcharge', 12, 0), ErreurFerme, 'hors de la ferme');
+  acheter(coffre, 'chemin', 2, 2); // un chemin est un sol : il passe sous une plante
+  assert.throws(() => acheter(coffre, 'chemin', 2, 2), ErreurFerme, 'pas deux chemins au même endroit');
+  acheter(coffre, 'rocher', 4, 4);
+  assert.throws(() => acheter(coffre, 'fleurs', 4, 4), ErreurFerme, 'case occupée');
+  assert.throws(() => acheter(coffre, 'banc', 6, 6), /niveau 2/);
+  assert.equal(vueFerme(coffre).pieces, 50 - 5 - 10);
+  acheter(coffre, 'buisson', 5, 5);
+  acheter(coffre, 'buisson', 6, 5);
+  assert.throws(() => acheter(coffre, 'fleurs', 7, 7), /Il te manque 7/);
+
+  const rocher = lireDisposition(coffre).decorations.find((d) => d.type === 'rocher')!;
+  deplacerDecoration(coffre, rocher.id, null, null); // rangé : gardé, sans remboursement
+  assert.equal(vueFerme(coffre).decorations.find((d) => d.id === rocher.id)?.x, null);
+  deplacerDecoration(coffre, rocher.id, 2, 3);
+  assert.equal(vueFerme(coffre).pieces, 5);
+
+  assert.equal(toutPlanter(coffre), 4);
+  vue = vueFerme(coffre);
+  assert.equal(vue.plantes.filter((p) => p.x === null).length, 0);
+  const cases = vue.plantes.map((p) => `${p.x},${p.y}`);
+  assert.equal(new Set(cases).size, cases.length, 'jamais deux plantes sur la même case');
+});
+
+test('ferme : les plantes reflètent la révision (stade, variété par Prosit, soif)', () => {
+  const coffre = coffreAvecNotions();
+  const n = lireNotionsRevision(coffre)[0];
+  enregistrerEtatTest(n.chemin, 5, '2026-11-01');
+  const p = vueFerme(coffre, '2026-11-22').plantes.find((x) => x.nom === n.nom)!;
+  assert.deepEqual([p.niveau, p.emoji, p.retard, p.variete], [5, '🌸', 21, 'pommier']);
+});
+
+function enregistrerEtatTest(chemin: string, niveau: number, prochaine: string) {
+  const { data, content } = lireNote(chemin);
+  data.niveau = niveau;
+  data.prochaine_revision = prochaine;
+  require('../src/core/coffre').ecrireNote(chemin, data, content);
+}
+
+test('ferme : sprites 16×16 avec des couleurs connues', () => {
+  const connues = new Set([...Object.keys(PALETTE), 'L', 'l', 'D', 'f', 'F', '.']);
+  for (const s of [...STADES, ...Object.values(DECORATIONS)]) {
+    assert.equal(s.length, 16);
+    for (const ligne of s) {
+      assert.equal(ligne.length, 16, ligne);
+      for (const c of ligne) assert.ok(connues.has(c), `couleur inconnue « ${c} »`);
+    }
+  }
+});
+
+test('séance : le bilan compte les pièces gagnées', async () => {
+  const coffre = coffreAvecNotions();
+  const seance = new Seance(coffre, { rapide: true, entrainement: false, perimetre: { type: 'tout' } }, hasardFixe());
+  const x = (await seance.suivant())!;
+  await seance.repondre(x.exercice.options ? { type: 'option', index: x.exercice.bonneOption! } : { type: 'texte', valeur: x.exercice.attendu ?? '' });
+  assert.equal(seance.terminer().pieces, 5);
 });

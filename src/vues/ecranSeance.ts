@@ -304,6 +304,9 @@ export class EcranSeance {
       case 'fermer':
         this.panneau.dispose();
         break;
+      case 'ferme':
+        await vscode.commands.executeCommand('forge.ferme');
+        break;
     }
   }
 
@@ -660,6 +663,7 @@ function afficherFin(b, entrainement) {
       '<div class="chiffre"><b>' + taux + ' %</b>de réussite</div>' +
       '<div class="chiffre"><b>' + b.montees.length + '</b>plantes ont poussé</div>' +
       '<div class="chiffre"><b>🔥 ' + b.serie + '</b>jour(s) de suite</div>' +
+      '<div class="chiffre"><b>+' + (b.pieces || 0) + ' 🪙</b>pour ta ferme</div>' +
     '</div>';
   if (b.verifiees) html += '<p>✅ ' + b.verifiees + ' définition(s) vérifiée(s).</p>';
   if (b.pistesValidees) html += '<p>📝 ' + b.pistesValidees + ' piste(s) de solution ajoutée(s) à tes CER.</p>';
@@ -669,11 +673,13 @@ function afficherFin(b, entrainement) {
   html += '<div class="actions">' +
     (b.restants && !entrainement ? '<button class="principal" id="reprendre">Continuer la révision</button>' : '') +
     '<button class="' + (b.restants && !entrainement ? 'secondaire' : 'principal') + '" id="continuer">🏋️ S\\'entraîner encore</button>' +
+    '<button class="secondaire" id="voirFerme">🌻 Voir ma ferme</button>' +
     '<button class="secondaire" id="fermer">Fermer</button></div></div>';
   zone.innerHTML = html;
   lier('reprendre', () => { etat = 'attente'; envoyer({ type: 'suivant' }); });
   lier('continuer', () => { etat = 'attente'; envoyer({ type: 'continuer' }); });
   lier('fermer', () => envoyer({ type: 'fermer' }));
+  lier('voirFerme', () => envoyer({ type: 'ferme' }));
 }
 
 window.addEventListener('message', (ev) => {

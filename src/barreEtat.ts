@@ -9,12 +9,17 @@ const STADES = ['🌰', '🌱', '🌿', '🪴', '🌳', '🌸', '🍎'];
 
 export class BarreEtat implements vscode.Disposable {
   private readonly element = vscode.window.createStatusBarItem('forge.aRevoir', vscode.StatusBarAlignment.Left, 50);
+  private readonly ferme = vscode.window.createStatusBarItem('forge.ferme', vscode.StatusBarAlignment.Left, 49);
   private surveillant?: vscode.FileSystemWatcher;
   private coffreSurveille?: string;
   private minuterie?: NodeJS.Timeout;
 
   constructor() {
     this.element.name = 'Forge — notions à revoir';
+    this.ferme.name = 'Forge — ma ferme';
+    this.ferme.text = '🌻';
+    this.ferme.tooltip = 'Forge : ouvrir ma ferme';
+    this.ferme.command = 'forge.ferme';
     this.actualiser();
     this.element.show();
   }
@@ -22,6 +27,8 @@ export class BarreEtat implements vscode.Disposable {
   actualiser(): void {
     const coffre = coffreActuel();
     this.surveiller(coffre);
+    if (coffre) this.ferme.show();
+    else this.ferme.hide();
     if (!coffre) {
       this.element.text = '🌱 Forge';
       this.element.tooltip = 'Forge : clique pour créer ou choisir ton coffre';
@@ -60,6 +67,7 @@ export class BarreEtat implements vscode.Disposable {
   dispose(): void {
     this.surveillant?.dispose();
     this.element.dispose();
+    this.ferme.dispose();
     if (this.minuterie) clearTimeout(this.minuterie);
   }
 }

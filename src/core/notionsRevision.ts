@@ -140,6 +140,8 @@ export interface EntreeHistorique {
   compte: boolean; // false = entraînement (n'a pas changé la répétition espacée)
   niveauAvant?: number;
   niveauApres?: number;
+  /** Note sur 20 (étude de cas) */
+  points?: number;
 }
 
 function cheminHistorique(coffre: string): string {
