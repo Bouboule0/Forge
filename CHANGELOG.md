@@ -1,5 +1,16 @@
 # Journal des versions
 
+## 0.4.0 — Phase 4 : code C++ et études de cas
+- **Exercices de code** générés par l'IA puis **vérifiés par Forge avant de te les donner** : la solution doit passer les tests, le code de départ doit compiler et échouer (sinon l'IA corrige, jusqu'à 3 essais).
+  - ⌨️ Exercice de code (5–10 min), 🐞 Trouve le bug, 🧱 Mini-projet dans l'histoire d'un Prosit (20–40 min).
+  - 🔮 Prédis la sortie : la bonne réponse est la **vraie** sortie du programme compilé.
+- **Séance code** (💻) et exercices de code dans la séance complète ; compilation avec `wsl g++` (ou ton compilateur), erreurs soulignées dans l'éditeur, **Ctrl+Alt+V** pour vérifier.
+- Les exercices restent dans le coffre (`Exercices/<notion>/`) : refaisables hors ligne, « Mes exercices de code ».
+- **Étude de cas sur papier** : sujet chronométré (20 min à 1 h), réponses sans compilateur ni autocomplétion, correction sur 20 par question, copie et corrigé enregistrés dans le coffre.
+- Preuves d'AAV : code (AAV [3]), exercice long et papier (AAV [5]) — elles débloquent les derniers stades des plantes.
+- Sécurité : le code généré qui touche aux fichiers ou au système est refusé ; chaque programme est arrêté au bout de 5 s.
+- WSL : commandes lancées avec `wsl -e` (chemins avec espaces ou apostrophes).
+
 ## 0.3.0 — Phase 3 : exercices corrigés par l'IA
 - **Explique avec tes mots, corrigé par DeepSeek** : note sur 10, ce qui est juste, ce qu'il faut revoir, explication modèle. Une explication réussie compte comme preuve d'AAV (débloque les stades au-delà de 🌳 pour les AAV [2]).
 - **Pistes de solutions de tes CER** : choisis validée / en partie / invalidée et justifie ; l'IA corrige et la réponse (statut + justification) est écrite dans le tableau de validation de ton CER, puis dans l'export Word.

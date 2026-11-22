@@ -4,16 +4,22 @@
 import {
   corriger,
   corrigeParIA,
+  estCode,
+  exerciceDeCode,
   genererExercice,
   genererPiste,
   PREUVES,
   type Correction,
   type Exercice,
   type Hasard,
+  type ModeCode,
   type Reponse,
+  type TypeCode,
 } from './exercices';
+import { enregistrerTentative, type ExerciceCode } from './exercicesCode';
 import {
   ajouterHistorique,
+  ajouterPreuve,
   enregistrerEtat,
   lireHistorique,
   lireNotionsRevision,
@@ -37,6 +43,15 @@ export interface OptionsSeance {
   verifierDefinitions?: boolean;
   /** Correction par l'IA (explications, pistes à valider). Absent = séance hors ligne. */
   ia?: CorrecteurIA;
+  /** Place des exercices de code dans la séance (« surtout » = séance code). */
+  code?: ModeCode;
+  /** Fournit les exercices de code (existants ou générés). Absent = pas d'exercice de code. */
+  atelier?: Atelier;
+}
+
+export interface Atelier {
+  /** Exercice de ce genre pour la notion, ou null s'il n'y en a pas (notion inadaptée, pas d'IA…). */
+  preparer(notion: NotionRevision, genre: TypeCode): Promise<ExerciceCode | null>;
 }
 
 type Element = { genre: 'notion'; notion: NotionRevision } | { genre: 'piste'; piste: PisteRevision };
@@ -172,7 +187,7 @@ export class Seance {
   }
 
   /** Exercice suivant, ou null quand la file est vide. */
-  suivant(): EnCours | null {
+  async suivant(): Promise<EnCours | null> {
     if (this.file.length === 0 && this.options.entrainement && this.bilan.faits > 0) this.remplirFile();
     const element = this.file.shift();
     if (!element) {
@@ -182,13 +197,24 @@ export class Seance {
     if (element.genre === 'piste') {
       this.courant = { exercice: genererPiste(element.piste), piste: element.piste };
     } else {
-      const exercice = genererExercice(element.notion, this.notions, {
+      const options = {
         rapide: this.options.rapide,
         precedent: this.precedent,
         hasard: this.hasard,
         verifierDefinitions: this.options.verifierDefinitions,
         ia: !!this.options.ia,
-      });
+        code: this.options.atelier ? this.options.code ?? 'jamais' : ('jamais' as ModeCode),
+      };
+      let exercice = genererExercice(element.notion, this.notions, options);
+      if (estCode(exercice.type)) {
+        let code: ExerciceCode | null = null;
+        try {
+          code = (await this.options.atelier?.preparer(element.notion, exercice.type)) ?? null;
+        } catch {
+          code = null;
+        }
+        exercice = code ? exerciceDeCode(element.notion, code) : genererExercice(element.notion, this.notions, { ...options, code: 'jamais' });
+      }
       this.courant = { exercice, notion: element.notion };
     }
     this.precedent = this.courant.exercice.type;
@@ -236,6 +262,9 @@ export class Seance {
     } else {
       correction = corriger(exercice, reponse);
     }
+    if (exercice.code && correction.resultat !== null) {
+      enregistrerTentative(exercice.code, correction.resultat === 'echec' ? 'abandonne' : 'reussi');
+    }
 
     const compte = !!notion && correction.resultat !== null && !this.options.entrainement && estARevoir(notion.etat, this.date);
     let changement: Changement | undefined;
@@ -250,6 +279,11 @@ export class Seance {
       const r = appliquerResultat(notion.etat, correction.resultat, PREUVES[exercice.type], this.date);
       notion.etat = r.etat;
       changement = r.changement;
+    } else if (notion && correction.resultat === 'reussite' && PREUVES[exercice.type] && PREUVES[exercice.type] !== 'trou' && PREUVES[exercice.type] !== 'qcm') {
+      // Hors calendrier (entraînement, 2e révision du jour) : une explication ou un code réussi reste une preuve d'AAV
+      const preuve = PREUVES[exercice.type]!;
+      notion.etat.preuves[preuve] = (notion.etat.preuves[preuve] ?? 0) + 1;
+      ajouterPreuve(notion.chemin, preuve);
     }
     if (notion && correction.verifiee) {
       notion.statut = 'verifie';

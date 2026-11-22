@@ -24,6 +24,8 @@ export interface NotionRevision {
   revueIA: string;
   definitions: DefinitionLue[];
   notesPerso: string;
+  /** Faux si l'IA a jugé la notion inadaptée aux exercices de code */
+  codePossible: boolean;
   etat: EtatRevision;
 }
 
@@ -72,6 +74,7 @@ export function lireNotionRevision(chemin: string): NotionRevision {
     revueIA: typeof data.revue_ia === 'string' ? data.revue_ia : '',
     definitions: lireDefinitions(content),
     notesPerso: lireNotesPerso(content),
+    codePossible: data.code_possible !== false,
     etat: {
       niveau: Math.max(0, Math.min(6, Number(data.niveau) || 0)),
       prochaine: lireDate(data.prochaine_revision),
@@ -108,6 +111,22 @@ export function enregistrerEtat(chemin: string, etat: EtatRevision, statut?: 'a_
   tags.push(`maitrise/${etat.niveau}`);
   data.tags = tags;
   ecrireNote(chemin, data, statut === 'verifie' ? retirerAvertissementIA(content) : content);
+}
+
+/** Ajoute une preuve d'AAV (code réussi hors séance, étude de cas…) sans changer le niveau. */
+export function ajouterPreuve(chemin: string, type: TypePreuve): void {
+  const { data, content } = lireNote(chemin);
+  const preuves = (data.preuves && typeof data.preuves === 'object' ? data.preuves : {}) as Record<string, number>;
+  preuves[type] = (Number(preuves[type]) || 0) + 1;
+  data.preuves = preuves;
+  ecrireNote(chemin, data, content);
+}
+
+/** Marque une notion comme inadaptée aux exercices de code (jugé par l'IA). */
+export function marquerSansCode(chemin: string): void {
+  const { data, content } = lireNote(chemin);
+  data.code_possible = false;
+  ecrireNote(chemin, data, content);
 }
 
 // --------------------------------------------------------------------------

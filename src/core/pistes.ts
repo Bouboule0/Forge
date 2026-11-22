@@ -113,3 +113,11 @@ export function enregistrerPiste(chemin: string, index: number, statut: StatutPi
   pistes[index] = { ...pistes[index], statut, justification };
   ecrireNote(chemin, data, remplacerBloc(content, 'pistes', pistesEnMarkdown(pistes)));
 }
+
+/** Contexte et problématique d'une note Prosit (pour des exercices « dans l'histoire » du Prosit). */
+export function lireContexteProsit(coffre: string, nomProsit: string): { titre: string; contexte: string; problematique: string } | undefined {
+  const chemin = path.join(cheminDossier(coffre, 'prosits'), `${nomProsit}.md`);
+  if (!fs.existsSync(chemin)) return undefined;
+  const { data, content } = lireNote(chemin);
+  return { titre: String(data.titre ?? '') || nomProsit, contexte: section(content, 'Contexte'), problematique: section(content, 'Problématique') };
+}

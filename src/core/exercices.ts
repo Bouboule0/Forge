@@ -4,10 +4,17 @@
 import type { NotionRevision } from './notionsRevision';
 import { ETIQUETTES_STATUT, type PisteRevision } from './pistes';
 import type { StatutPiste } from './parseurCer';
+import { memeSortie } from './compilation';
+import type { ExerciceCode } from './exercicesCode';
 import type { Resultat, TypePreuve } from './repetition';
 import { distance, motsCles, normaliser, singulier } from './texte';
 
-export type TypeExercice = 'trou' | 'qcm_notion' | 'qcm_definition' | 'flashcard' | 'verification' | 'explication' | 'piste_valider' | 'piste_vf';
+export type TypeExercice = 'trou' | 'qcm_notion' | 'qcm_definition' | 'flashcard' | 'verification' | 'explication' | 'piste_valider' | 'piste_vf' | 'code' | 'bug' | 'sortie';
+
+/** Exercices de code C++ (préparés par l'atelier : réutilisés ou générés, puis compilés). */
+export const TYPES_CODE = ['code', 'bug', 'sortie'] as const;
+export type TypeCode = (typeof TYPES_CODE)[number];
+export const estCode = (t: TypeExercice): t is TypeCode => (TYPES_CODE as readonly string[]).includes(t);
 
 export const LIBELLES: Record<TypeExercice, string> = {
   trou: 'Texte à trous',
@@ -18,6 +25,9 @@ export const LIBELLES: Record<TypeExercice, string> = {
   explication: 'Explique — corrigé par l\'IA',
   piste_valider: 'Valide une piste de ton CER',
   piste_vf: 'Piste : validée ou pas ?',
+  code: 'Exercice de code',
+  bug: 'Trouve le bug',
+  sortie: 'Prédis la sortie',
 };
 
 /** Type de preuve enregistré quand l'exercice est réussi (null = ne compte pas comme preuve). */
@@ -30,6 +40,9 @@ export const PREUVES: Record<TypeExercice, TypePreuve | null> = {
   explication: 'explication',
   piste_valider: null,
   piste_vf: null,
+  code: 'code',
+  bug: 'code',
+  sortie: null,
 };
 
 export interface Exercice {
@@ -48,6 +61,8 @@ export interface Exercice {
   solution?: string;
   /** Pour les exercices sur une piste de solution */
   piste?: PisteRevision;
+  /** Pour les exercices de code */
+  code?: ExerciceCode;
 }
 
 export type Hasard = () => number;
@@ -302,6 +317,23 @@ export function genererVerification(n: NotionRevision): Exercice | null {
   };
 }
 
+/** Exercice de code à préparer (l'atelier remplira `code` : exercice existant ou généré). */
+export function genererCodeAPreparer(n: NotionRevision, type: TypeCode): Exercice {
+  return { type, notion: n.nom, consigne: '', enonce: '' };
+}
+
+/** Complète un exercice de code préparé par l'atelier. */
+export function exerciceDeCode(n: NotionRevision, code: ExerciceCode): Exercice {
+  const type: TypeCode = code.genre === 'long' ? 'code' : code.genre;
+  return {
+    type,
+    notion: n.nom,
+    consigne: type === 'sortie' ? `Que va afficher ce programme ? (**${n.titre}**)` : `**${code.titre}** — ${n.titre}`,
+    enonce: code.enonce,
+    code,
+  };
+}
+
 export function genererExplication(n: NotionRevision): Exercice {
   return {
     type: 'explication',
@@ -328,7 +360,22 @@ export function genererPiste(p: PisteRevision): Exercice {
 // --------------------------------------------------------------------------
 // Choix de l'exercice
 
-export function typesPossibles(n: NotionRevision, toutes: NotionRevision[], rapide: boolean, verifierDefinitions = false, ia = false): TypeExercice[] {
+export type ModeCode = 'jamais' | 'parfois' | 'surtout';
+
+export function typesPossibles(
+  n: NotionRevision,
+  toutes: NotionRevision[],
+  rapide: boolean,
+  verifierDefinitions = false,
+  ia = false,
+  code: ModeCode = 'jamais',
+): TypeExercice[] {
+  // Exercices de code : « prédis la sortie » pour toutes les notions, écrire / corriger du code pour les AAV [3] et plus
+  if (code !== 'jamais' && !rapide && n.codePossible) {
+    const typesCode: TypeExercice[] = n.etat.aavCible >= 3 ? ['code', 'bug', 'sortie'] : ['sortie'];
+    if (code === 'surtout') return typesCode;
+    return [...typesPossibles(n, toutes, rapide, verifierDefinitions, ia, 'jamais'), ...typesCode];
+  }
   const types: TypeExercice[] = [];
   const avecDef = toutes.filter(aUneDefinition).length;
   if (aUneDefinition(n)) {
@@ -342,16 +389,18 @@ export function typesPossibles(n: NotionRevision, toutes: NotionRevision[], rapi
   return types;
 }
 
-const POIDS: Record<TypeExercice, number> = { trou: 3, qcm_notion: 2, qcm_definition: 2, flashcard: 1.5, verification: 2, explication: 2, piste_valider: 0, piste_vf: 0 };
+const POIDS: Record<TypeExercice, number> = {
+  trou: 3, qcm_notion: 2, qcm_definition: 2, flashcard: 1.5, verification: 2, explication: 2, piste_valider: 0, piste_vf: 0, code: 1.2, bug: 1, sortie: 1.2,
+};
 
 /** Choisit et génère un exercice pour la notion, en évitant de répéter le type précédent. */
 export function genererExercice(
   n: NotionRevision,
   toutes: NotionRevision[],
-  options: { rapide: boolean; precedent?: TypeExercice; hasard?: Hasard; verifierDefinitions?: boolean; ia?: boolean },
+  options: { rapide: boolean; precedent?: TypeExercice; hasard?: Hasard; verifierDefinitions?: boolean; ia?: boolean; code?: ModeCode },
 ): Exercice {
   const hasard = options.hasard ?? Math.random;
-  let types = typesPossibles(n, toutes, options.rapide, options.verifierDefinitions, options.ia);
+  let types = typesPossibles(n, toutes, options.rapide, options.verifierDefinitions, options.ia, options.code);
   if (types.length > 1 && options.precedent) types = types.filter((t) => t !== options.precedent);
   // Une graine jamais révisée dont la définition est à vérifier : on commence souvent par la vérifier
   const poids = (t: TypeExercice) => POIDS[t] * (t === 'verification' && n.etat.niveau === 0 ? 2 : 1);
@@ -373,6 +422,7 @@ export function genererExercice(
       : type === 'qcm_definition' ? genererQcmDefinition(n, toutes, hasard)
       : type === 'verification' ? genererVerification(n)
       : type === 'explication' ? genererExplication(n)
+      : estCode(type) ? genererCodeAPreparer(n, type)
       : genererFlashcard(n);
     if (exercice) return exercice;
     essais.splice(essais.indexOf(type), 1);
@@ -389,7 +439,8 @@ export type Reponse =
   | { type: 'jeNeSaisPas' }
   | { type: 'autoEvaluation'; resultat: Resultat }
   | { type: 'verification'; choix: 'juste' | 'corriger' | 'passer' }
-  | { type: 'piste'; statut: StatutPiste; justification: string };
+  | { type: 'piste'; statut: StatutPiste; justification: string }
+  | { type: 'code'; reussi: boolean };
 
 export interface Correction {
   resultat: Resultat | null; // null = ne compte pas (passer / corriger)
@@ -442,5 +493,18 @@ export function corriger(e: Exercice, r: Reponse): Correction {
     case 'explication':
     case 'piste_valider':
       return { resultat: null };
+    case 'code':
+    case 'bug':
+      return { resultat: r.type === 'code' ? (r.reussi ? 'reussite' : 'echec') : null };
+    case 'sortie': {
+      const attendu = e.code?.sortieAttendue ?? '';
+      if (r.type !== 'texte') return { resultat: null };
+      if (memeSortie(r.valeur, attendu)) return { resultat: 'reussite', bonneReponse: attendu };
+      // À moitié juste : au moins la moitié des lignes à la bonne place
+      const a = attendu.trim().split('\n').map((l) => l.trim());
+      const b = r.valeur.trim().split('\n').map((l) => l.trim());
+      const justes = a.filter((l, i) => l === b[i]).length;
+      return { resultat: justes * 2 >= a.length && justes > 0 ? 'moyen' : 'echec', bonneReponse: attendu };
+    }
   }
 }

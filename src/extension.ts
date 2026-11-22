@@ -14,6 +14,8 @@ import { afficherNotionsARevoir, BarreEtat } from './barreEtat';
 import { reglages as reglagesForge, choisirCoffre, coffreActuel, commandePandoc, compilateur, modeleWord, moduleParDefaut, obtenirCoffre } from './config';
 import { cheminPour, executer, passeParWsl } from './systeme';
 import { lancerRevision, suggererRevision } from './revision';
+import { etudeDeCas, mesExercices, nouvelExercice, verifierCommande } from './code';
+import { initialiserDiagnostics } from './verificationCode';
 import { accepterDefinitionsIA, configurerCle, lancerRelecture } from './ia';
 
 let journal: vscode.OutputChannel;
@@ -82,13 +84,24 @@ export function activate(context: vscode.ExtensionContext): void {
   commande('forge.exporterWord', exporterWord);
   commande('forge.ouvrirCoffre', ouvrirCoffre);
   commande('forge.notionsARevoir', afficherNotionsARevoir);
-  commande('forge.reviser', (uri?: vscode.Uri) => lancerRevision(context, uri, () => barre.actualiser()));
+  commande('forge.reviser', (uri?: vscode.Uri) => lancerRevision(context, journal, uri, () => barre.actualiser()));
+  commande('forge.nouvelExercice', () => nouvelExercice(context, journal));
+  commande('forge.verifierExercice', (uri?: vscode.Uri) => verifierCommande(coffreActuel(), journal, uri));
+  commande('forge.mesExercices', mesExercices);
+  commande('forge.etudeDeCas', () => etudeDeCas(context, () => barre.actualiser()));
 
   context.subscriptions.push(
     barre,
     journal,
     vscode.workspace.onDidChangeConfiguration((e) => e.affectsConfiguration('forge') && barre.actualiser()),
   );
+
+  // Après les commandes : un souci ici ne doit pas empêcher Forge de fonctionner
+  try {
+    initialiserDiagnostics(context);
+  } catch (e) {
+    journal.appendLine(`[diagnostics] ${e}`);
+  }
 
   // Une révision est proposée au démarrage (au plus une fois par jour)
   setTimeout(() => suggererRevision(context), 4000);
