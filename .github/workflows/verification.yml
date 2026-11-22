@@ -1,0 +1,28 @@
+# Vérifie Forge à chaque pull request et sur main : types, tests (avec g++), paquet .vsix.
+name: Vérification
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verifier:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Vérification des types
+        run: npm run typecheck
+      - name: Tests (dont compilation C++ avec g++)
+        run: npm test
+      - name: Paquet de l'extension
+        run: npx vsce package --allow-missing-repository
+      - uses: actions/upload-artifact@v4
+        with:
+          name: forge-vsix
+          path: '*.vsix'

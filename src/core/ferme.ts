@@ -59,7 +59,7 @@ const GAINS: Record<string, Partial<Record<EntreeHistorique['resultat'], number>
 
 /** Pièces rapportées par une entrée de l'historique. */
 export function gainEntree(e: EntreeHistorique): number {
-  if (e.type === 'etude_de_cas') return Math.round(2 * (e.points ?? 0));
+  if (e.type === 'etude_de_cas' || e.type === 'cctl') return Math.round(2 * (e.points ?? 0));
   const regle = GAINS[e.type];
   let gain = regle ? regle[e.resultat] ?? 0 : e.resultat === 'reussite' ? (e.compte ? 5 : 2) : e.resultat === 'moyen' ? 2 : 0;
   // Récolte : réviser avec succès une notion déjà mûre (🍎)

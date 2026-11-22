@@ -208,7 +208,8 @@ export async function mesExercices(): Promise<void> {
 // --------------------------------------------------------------------------
 // Commande : étude de cas sur papier
 
-export async function etudeDeCas(context: vscode.ExtensionContext, surFin: () => void): Promise<void> {
+/** Étude de cas sur papier ; `programme` = Prosits imposés (étude de cas blanche d'un examen). */
+export async function etudeDeCas(context: vscode.ExtensionContext, surFin: () => void, programme?: { titre: string; prosits: string[] }): Promise<void> {
   const coffre = await obtenirCoffre();
   if (!coffre) return;
   const client = await clientIA(context, true);
@@ -219,8 +220,10 @@ export async function etudeDeCas(context: vscode.ExtensionContext, surFin: () =>
     vscode.window.showInformationMessage("Aucun Prosit dans le coffre : importe d'abord tes CER.");
     return;
   }
-  const prosit = await vscode.window.showQuickPick(prosits, { title: '📝 Étude de cas sur papier — sur quel Prosit ?' });
+  const choisis = programme?.prosits.filter((p) => prosits.includes(p)) ?? [];
+  const prosit = choisis[0] ?? (await vscode.window.showQuickPick(prosits, { title: '📝 Étude de cas sur papier — sur quel Prosit ?' }));
   if (!prosit) return;
+  const tousLesProsits = choisis.length ? choisis : [prosit];
   const duree = await vscode.window.showQuickPick(
     [
       { label: '20 minutes', minutes: 20 },
@@ -232,8 +235,12 @@ export async function etudeDeCas(context: vscode.ExtensionContext, surFin: () =>
   );
   if (!duree) return;
 
-  const contexte = lireContexteProsit(coffre, prosit);
-  const notions = lireNotionsRevision(coffre).filter((n) => n.prosits.includes(prosit));
+  // Plusieurs Prosits (programme d'un examen) : le sujet part du contexte de chacun
+  const contextes = tousLesProsits.map((p) => lireContexteProsit(coffre, p)).filter((c): c is NonNullable<typeof c> => !!c);
+  const contexte = contextes.length
+    ? { titre: programme?.titre ?? contextes[0].titre, contexte: contextes.map((c) => `${c.titre} : ${c.contexte}`).join('\n\n'), problematique: contextes.map((c) => c.problematique).join(' / ') }
+    : undefined;
+  const notions = lireNotionsRevision(coffre).filter((n) => n.prosits.some((p) => tousLesProsits.includes(p)));
   try {
     const etude = await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: "🤖 L'IA écrit le sujet de ton étude de cas…" },

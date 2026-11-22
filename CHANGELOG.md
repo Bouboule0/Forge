@@ -1,5 +1,13 @@
 # Journal des versions
 
+## 1.0.0 — Phase 6 : examens, statistiques, finitions (fin des phases principales)
+- **Mes examens** : date, type (CCTL, étude de cas) et Prosits au programme. Dans les 3 semaines qui précèdent, les notions au programme reviennent de plus en plus souvent ; compte à rebours dans la barre d'état.
+- **CCTL blanc** : questionnaire chronométré (10, 20 ou 30 questions) tiré de tes notes, de tes pistes validées et, avec une clé DeepSeek, de questions de l'IA sur le C++ ; note sur 20 et correction à la fin, compte rendu dans le coffre, « Réviser mes erreurs ».
+- **Étude de cas blanche** sur le programme d'un examen (plusieurs Prosits).
+- **Statistiques** : notions maîtrisées, série, exercices de la semaine, réussite sur 30 jours, activité par jour, révisions prévues, maîtrise par Prosit, réussite par type d'exercice, AAV prouvés, avancement des tableaux de validation des CER, notions fragiles, examens à venir. Graphiques lisibles en thème clair et sombre, bulles d'info, tableau sous chaque graphique.
+- **Prise en main** intégrée à VS Code (page d'accueil « Bien démarrer avec Forge »).
+- Icône pixel-art, vérification automatique sur GitHub (types, tests, paquet `.vsix`).
+
 ## 0.5.0 — Phase 5 : la ferme
 - **Ma ferme** (commande, 🌻 dans la barre d'état, bouton en fin de séance) : une plante pixel-art par notion, que tu places toi-même.
 - 7 stades de croissance (🌰 → 🍎) liés à la répétition espacée ; 8 variétés (une par Prosit) ; les notions en retard **fanent**, celles à réviser ont une goutte 💧, les mûres brillent.

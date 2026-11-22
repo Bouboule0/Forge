@@ -17,6 +17,10 @@ import { lancerRevision, suggererRevision } from './revision';
 import { etudeDeCas, mesExercices, nouvelExercice, verifierCommande } from './code';
 import { initialiserDiagnostics } from './verificationCode';
 import { EcranFerme } from './vues/ecranFerme';
+import { EcranStats } from './vues/ecranStats';
+import { lancerCctl, mesExamens, nouvelExamen, preparerExamen, type OutilsExamens } from './examens';
+import { lireExamens } from './core/examens';
+import type { Perimetre } from './core/seance';
 import { accepterDefinitionsIA, configurerCle, lancerRelecture } from './ia';
 
 let journal: vscode.OutputChannel;
@@ -89,6 +93,12 @@ export function activate(context: vscode.ExtensionContext): void {
   const apresActivite = () => {
     barre.actualiser();
     EcranFerme.actualiser();
+    EcranStats.actualiser();
+  };
+  const outilsExamens: OutilsExamens = {
+    reviser: (perimetre: Perimetre) => lancerRevision(context, journal, perimetre, apresActivite),
+    etudeDeCas: (programme) => etudeDeCas(context, apresActivite, programme),
+    surFin: apresActivite,
   };
   commande('forge.reviser', (uri?: vscode.Uri) => lancerRevision(context, journal, uri, apresActivite));
   commande('forge.ferme', async () => {
@@ -102,6 +112,31 @@ export function activate(context: vscode.ExtensionContext): void {
   commande('forge.verifierExercice', (uri?: vscode.Uri) => verifierCommande(coffreActuel(), journal, uri));
   commande('forge.mesExercices', mesExercices);
   commande('forge.etudeDeCas', () => etudeDeCas(context, apresActivite));
+  commande('forge.examens', () => mesExamens(context, outilsExamens));
+  commande('forge.priseEnMain', () => vscode.commands.executeCommand('workbench.action.openWalkthrough', 'bouboule0.forge#forge.priseEnMain', false));
+  commande('forge.cctlBlanc', async () => {
+    const coffre = await obtenirCoffre();
+    if (!coffre) return;
+    const dossier = cheminDossier(coffre, 'prosits');
+    const prosits = fs.existsSync(dossier) ? fs.readdirSync(dossier).filter((f) => f.endsWith('.md')).map((f) => f.slice(0, -3)).sort() : [];
+    const choix = await vscode.window.showQuickPick(
+      [{ label: '📚 Toutes les notions', p: { type: 'tout' } as Perimetre }, ...prosits.map((p) => ({ label: p, p: { type: 'prosit', nom: p } as Perimetre }))],
+      { title: '📝 CCTL blanc — sur quoi ?' },
+    );
+    if (choix) await lancerCctl(context, choix.p, choix.label.replace('📚 ', ''), outilsExamens);
+  });
+  commande('forge.statistiques', async () => {
+    const coffre = await obtenirCoffre();
+    if (!coffre) return;
+    EcranStats.ouvrir(coffre, {
+      reviserNotion: (nom) => lancerRevision(context, journal, { type: 'notion', nom }, apresActivite),
+      reviserExamen: (id) => {
+        const e = lireExamens(coffre).find((x) => x.id === id);
+        if (e) void preparerExamen(context, e, outilsExamens);
+      },
+      ajouterExamen: () => void nouvelExamen(apresActivite),
+    });
+  });
 
   context.subscriptions.push(
     barre,
@@ -123,8 +158,9 @@ export function activate(context: vscode.ExtensionContext): void {
   if (!context.globalState.get('forge.accueilVu') && !coffreActuel()) {
     context.globalState.update('forge.accueilVu', true);
     vscode.window
-      .showInformationMessage('🌱 Bienvenue dans Forge ! Commence par créer ton second cerveau.', 'Créer mon coffre', 'Vérifier l\'installation')
+      .showInformationMessage('🌱 Bienvenue dans Forge ! Commence par créer ton second cerveau.', 'Prise en main', 'Créer mon coffre', 'Vérifier l\'installation')
       .then((r) => {
+        if (r === 'Prise en main') vscode.commands.executeCommand('forge.priseEnMain');
         if (r === 'Créer mon coffre') vscode.commands.executeCommand('forge.choisirCoffre');
         if (r === 'Vérifier l\'installation') vscode.commands.executeCommand('forge.verifierInstallation');
       });
