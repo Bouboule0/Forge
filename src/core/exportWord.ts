@@ -3,7 +3,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { cheminDossier, DOSSIERS, lireNote } from './coffre';
-import { lireBloc } from './ecritureCoffre';
+import { lireBloc } from './blocs';
+import { lirePistes, STATUT_WORD } from './pistes';
 import { nomFichierSur } from './texte';
 
 /** [[a|b]] → b, [[a]] → a, ![[img.png]] → image du dossier Ressources. */
@@ -33,30 +34,6 @@ function definitionNotion(coffre: string, nom: string, nomProsit: string): strin
   }
   // La section « Mes notes » de l'utilisateur prime si elle commence par une définition
   return choisie.trim().startsWith('_') ? '' : choisie.trim();
-}
-
-interface PisteLue {
-  texte: string;
-  statut: string;
-  justification: string;
-}
-
-function lirePistes(bloc: string): PisteLue[] {
-  const pistes: PisteLue[] = [];
-  for (const ligne of bloc.split('\n')) {
-    const piste = ligne.match(/^- \[[ xX]\]\s+(.*)$/);
-    if (piste) {
-      pistes.push({ texte: piste[1].trim(), statut: '', justification: '' });
-      continue;
-    }
-    const derniere = pistes[pistes.length - 1];
-    if (!derniere) continue;
-    const statut = ligne.match(/^\s+- Statut\s*:\s*(.*)$/);
-    if (statut) derniere.statut = /invalid/i.test(statut[1]) ? 'Invalidée' : /valid/i.test(statut[1]) && !/à valider/i.test(statut[1]) ? 'Validée' : '';
-    const justification = ligne.match(/^\s+- Justification\s*:\s*(.*)$/);
-    if (justification) derniere.justification = justification[1].trim() === '…' ? '' : justification[1].trim();
-  }
-  return pistes;
 }
 
 /**
@@ -95,7 +72,7 @@ export function construireCer(coffre: string, cheminNote: string): { markdown: s
       ].join('\n')
     : '';
 
-  const pistes = lirePistes(lireBloc(content, 'pistes') ?? '').filter((p) => p.texte !== '…');
+  const pistes = lirePistes(lireBloc(content, 'pistes') ?? '');
   const listePistes = pistes.map((p) => `- ${p.texte}`).join('\n');
   const tableauValidation = pistes.length
     ? [
@@ -103,7 +80,7 @@ export function construireCer(coffre: string, cheminNote: string): { markdown: s
         '',
         '| Pistes de solutions | Validée / Invalidée | Justification |',
         '| --- | --- | --- |',
-        ...pistes.map((p) => `| ${echapperCellule(p.texte)} | ${p.statut} | ${echapperCellule(p.justification)} |`),
+        ...pistes.map((p) => `| ${echapperCellule(p.texte)} | ${STATUT_WORD[p.statut]} | ${echapperCellule(p.justification)} |`),
       ].join('\n')
     : '';
 

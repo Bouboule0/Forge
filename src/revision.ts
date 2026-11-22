@@ -9,7 +9,9 @@ import { aujourdhui } from './core/texte';
 import { estARevoir } from './core/repetition';
 import { coffreActuel, obtenirCoffre, reglages } from './config';
 import { EcranSeance } from './vues/ecranSeance';
-import { accepterDefinitionsIA } from './ia';
+import { accepterDefinitionsIA, clientIA } from './ia';
+import { creerCorrecteur } from './core/correctionIA';
+import { lirePistesCoffre } from './core/pistes';
 
 /** Périmètre déduit du fichier (clic droit sur une note Prosit ou Notion). */
 function perimetreDepuis(coffre: string, uri?: vscode.Uri): Perimetre {
@@ -21,7 +23,7 @@ function perimetreDepuis(coffre: string, uri?: vscode.Uri): Perimetre {
   return { type: 'tout' };
 }
 
-export async function lancerRevision(uri: vscode.Uri | undefined, surFin: () => void): Promise<void> {
+export async function lancerRevision(context: vscode.ExtensionContext, uri: vscode.Uri | undefined, surFin: () => void): Promise<void> {
   const coffre = await obtenirCoffre();
   if (!coffre) return;
   const perimetre = perimetreDepuis(coffre, uri instanceof vscode.Uri ? uri : undefined);
@@ -32,14 +34,24 @@ export async function lancerRevision(uri: vscode.Uri | undefined, surFin: () => 
     return;
   }
   const aRevoir = notions.filter((n) => estARevoir(n.etat)).length;
+  const client = await clientIA(context, false);
+  const pistesAValider = perimetre.type === 'notion' ? 0 : lirePistesCoffre(coffre).filter((p) => p.statut === 'a_valider' && (perimetre.type === 'tout' || p.prosit === perimetre.nom)).length;
   const cible = perimetre.type === 'tout' ? '' : ` — ${perimetre.nom}`;
 
   type Choix = vscode.QuickPickItem & { rapide: boolean; entrainement: boolean };
   const choix: Choix[] = [];
-  if (aRevoir > 0) {
+  if (aRevoir > 0 || (client && pistesAValider > 0)) {
     choix.push(
       { label: '⚡ Séance rapide', description: 'textes à trous et QCM', detail: `${aRevoir} notion(s) à revoir — idéal entre deux cours`, rapide: true, entrainement: false },
-      { label: '🧠 Séance complète', description: '+ expliquer avec tes mots', detail: 'Pour une vraie session de révision', rapide: false, entrainement: false },
+      {
+        label: '🧠 Séance complète',
+        description: client ? '+ explications et pistes corrigées par l\'IA' : '+ expliquer avec tes mots',
+        detail: client
+          ? `Pour une vraie session${pistesAValider ? ` · ${pistesAValider} piste(s) de tes CER à valider` : ''}`
+          : 'Ajoute ta clé DeepSeek (« Forge : Configurer la clé DeepSeek ») pour que l\'IA corrige tes explications et tes pistes',
+        rapide: false,
+        entrainement: false,
+      },
     );
   }
   choix.push({
@@ -52,7 +64,17 @@ export async function lancerRevision(uri: vscode.Uri | undefined, surFin: () => 
 
   const choisi = await vscode.window.showQuickPick(choix, { title: `🌱 Réviser${cible}`, placeHolder: 'Quel type de séance ?' });
   if (!choisi) return;
-  EcranSeance.ouvrir(coffre, { rapide: choisi.rapide, entrainement: choisi.entrainement, perimetre, verifierDefinitions: !accepterDefinitionsIA() }, surFin);
+  EcranSeance.ouvrir(
+    coffre,
+    {
+      rapide: choisi.rapide,
+      entrainement: choisi.entrainement,
+      perimetre,
+      verifierDefinitions: !accepterDefinitionsIA(),
+      ia: client ? creerCorrecteur(client) : undefined,
+    },
+    surFin,
+  );
 }
 
 /** Propose une révision au démarrage de VS Code (une fois par jour au maximum). */

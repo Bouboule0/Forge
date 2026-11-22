@@ -4,7 +4,9 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import type { CerAnalyse, Piste } from './parseurCer';
+import type { CerAnalyse } from './parseurCer';
+import { bloc, lireBloc, remplacerBloc } from './blocs';
+import { pistesEnMarkdown } from './pistes';
 import { cheminDossier, DOSSIERS, ecrireNote, lireNote, trouverNoteProsit } from './coffre';
 import { nomNoteProsit, resoudreFusions, type NotionCandidate, type PlanImport, type PrositPlan } from './planImport';
 import { aujourdhui, motsCles, motsProches, nomFichierSur } from './texte';
@@ -80,20 +82,7 @@ gris = graine, marron = germe, verts = pousse → plant adulte, rose = en fleurs
 // --------------------------------------------------------------------------
 // Blocs gérés par Forge
 
-export function bloc(nom: string, contenu: string): string {
-  return `<!-- forge:${nom} -->\n${contenu.trim()}\n<!-- /forge:${nom} -->`;
-}
-
-export function lireBloc(texte: string, nom: string): string | null {
-  const m = texte.match(new RegExp(`<!-- forge:${nom} -->\\n?([\\s\\S]*?)\\n?<!-- /forge:${nom} -->`));
-  return m ? m[1] : null;
-}
-
-export function remplacerBloc(texte: string, nom: string, contenu: string): string {
-  const motif = new RegExp(`<!-- forge:${nom} -->[\\s\\S]*?<!-- /forge:${nom} -->`);
-  if (motif.test(texte)) return texte.replace(motif, () => bloc(nom, contenu));
-  return `${texte.trimEnd()}\n\n${bloc(nom, contenu)}\n`;
-}
+export { bloc, lireBloc, remplacerBloc } from './blocs';
 
 /** Ajoute à un bloc de lignes les lignes absentes. */
 function fusionnerLignes(existant: string | null, nouvelles: string[]): string {
@@ -134,23 +123,7 @@ export function compacterListes(md: string): string {
   return md.replace(/^(\s*)-\s{2,}/gm, '$1- ').replace(/^(\s*)(\d+\.)\s{2,}/gm, '$1$2 ');
 }
 
-const ETIQUETTES_STATUT: Record<Piste['statut'], string> = {
-  validee: '✅ Validée',
-  invalidee: '❌ Invalidée',
-  a_valider: '❓ À valider',
-};
-
-export function pistesEnMarkdown(pistes: Piste[]): string {
-  if (pistes.length === 0) return '_Aucune piste._';
-  return pistes
-    .map((p) => {
-      const coche = p.statut === 'a_valider' ? ' ' : 'x';
-      const lignes = [`- [${coche}] ${p.texte}`, `    - Statut : ${ETIQUETTES_STATUT[p.statut]}`];
-      lignes.push(`    - Justification : ${p.justification || '…'}`);
-      return lignes.join('\n');
-    })
-    .join('\n');
-}
+export { pistesEnMarkdown };
 
 // --------------------------------------------------------------------------
 // Écriture du plan d'import

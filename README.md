@@ -13,7 +13,7 @@ Le plan complet est dans [`docs/PLAN.md`](docs/PLAN.md).
 | 0. Installation | Squelette, vérification de `wsl g++`, « Hello Forge » | ✅ |
 | 1. Import | Import des CER (.docx), écran de validation, nouveau Prosit, export Word | ✅ |
 | 2. Révision hors ligne | Texte à trous, QCM, répétition espacée, séances | ✅ |
-| 3. IA (DeepSeek) | Relecture des définitions ✅ · vrai ou faux sur les pistes, explication libre ⏳ | 🚧 |
+| 3. IA (DeepSeek) | Relecture des définitions, explications corrigées, pistes de solutions | ✅ |
 | 4. Code | Exercices C++ compilés et testés, mode papier | ⏳ |
 | 5. Ferme | Ferme pixel-art que tu aménages toi-même | ⏳ |
 | 6. Finitions | Mode examen (CCTL, étude de cas), statistiques, `.vsix` | ⏳ |
@@ -139,10 +139,17 @@ Un clic droit sur une note Prosit ou Notion → **Forge : Réviser** révise seu
 | Séance | Contenu |
 |---|---|
 | ⚡ Rapide | Textes à trous et QCM, idéal entre deux cours |
-| 🧠 Complète | En plus : expliquer avec tes mots |
+| 🧠 Complète | En plus : expliquer avec tes mots (corrigé par l'IA si ta clé DeepSeek est enregistrée) et valider les pistes de tes CER |
 | 🏋️ Entraînement libre | Tout le périmètre, sans changer le calendrier (pratique avant un CCTL) |
 
 La séance dure **aussi longtemps que tu veux** (bouton « Terminer la séance »). Raccourcis : `Entrée` valider / suivant, `1`–`4` choisir une réponse, `Échap` je ne sais pas.
+
+### Avec l'IA (clé DeepSeek enregistrée)
+
+- **Explique avec tes mots** : tu écris ton explication, l'IA la note sur 10, te dit ce qui est juste et ce qu'il faut revoir, et propose une explication modèle. Sans clé, tu t'auto-évalues.
+- **Valide une piste de ton CER** : pour chaque piste « ❓ À valider » de tes Prosits, choisis ✅ validée, ⚠️ en partie ou ❌ invalidée, et justifie. L'IA corrige, puis **le statut et la justification sont écrits dans le tableau de validation de ton CER** (et donc dans l'export Word). Même « Je ne sais pas » complète le CER avec la réponse de l'IA.
+- Les pistes déjà validées reviennent en **vrai/faux** (hors ligne), au plus une fois par semaine chacune.
+- Raccourci : `Ctrl+Entrée` pour envoyer un texte à l'IA.
 
 ### Comment poussent tes plantes
 
@@ -158,7 +165,7 @@ La séance dure **aussi longtemps que tu veux** (bouton « Terminer la séance �
 
 - Un **échec** fait perdre un niveau (deux à partir de 🌳), et la notion revient le lendemain. Elle revient aussi plus tard dans la même séance.
 - **Seule la première réponse du jour** compte ; les suivantes sont de l'entraînement.
-- Pour dépasser 🌳, il faut des exercices qui prouvent l'AAV : une explication corrigée par l'IA (phase 3), du code pour un AAV [3] (phase 4)…
+- Pour dépasser 🌳, il faut des exercices qui prouvent l'AAV : une explication réussie corrigée par l'IA, et du code pour un AAV [3] (phase 4)…
 
 ## 🤖 Définitions générées par IA
 
@@ -246,7 +253,7 @@ npm run essai-import -- ./coffre-test chemin/vers/CER.docx
 
 | Dossier | Contenu |
 |---|---|
-| `src/core/` | Logique sans VS Code : import, écriture du coffre, export Word, répétition espacée, exercices, séance |
+| `src/core/` | Logique sans VS Code : import, écriture du coffre, export Word, répétition espacée, exercices, pistes, séance, corrections IA |
 | `src/vues/` | Webviews (écran de validation, écran de séance) |
 | `src/extension.ts` | Commandes VS Code |
 | `scripts/` | Tests et essais en ligne de commande |
