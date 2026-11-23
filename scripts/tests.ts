@@ -1095,3 +1095,27 @@ test('ENT CESI (parcours actuel) : « Connexion réussie » sans retour → on r
     ent.fermer();
   }
 });
+
+test('cookies : lignes Set-Cookie fusionnées (dates avec virgule comprises)', async () => {
+  const { separerSetCookie } = await import('../src/core/entCesi');
+  assert.deepEqual(
+    separerSetCookie('TGC=abc; Path=/; Expires=Thu, 01 Jan 2099 00:00:00 GMT; Secure, SESSION=xyz; Path=/cas; HttpOnly,MSISAuth=1'),
+    ['TGC=abc; Path=/; Expires=Thu, 01 Jan 2099 00:00:00 GMT; Secure', 'SESSION=xyz; Path=/cas; HttpOnly', 'MSISAuth=1'],
+  );
+});
+
+test('ENT CESI : le diagnostic contient le parcours (noms de cookies) sans aucune valeur', async () => {
+  const ent = await fauxEnt({ inconnu: true });
+  try {
+    await assert.rejects(connexionEnt('mateo.durand@viacesi.fr', 'bon-mot-de-passe', ent.adresses), (e: unknown) => {
+      const d = (e as ErreurEnt).diagnostic ?? '';
+      assert.match(d, /Parcours \(SAMLResponse\) :/);
+      assert.match(d, /POST http:\/\/127\.0\.0\.1:\d+\/saml\/acs → 302 vers http:\/\/127\.0\.0\.1:\d+\/accueil · cookies envoyés : [^\n]* · reçus : ENT_SESSION/);
+      assert.match(d, /\/login\?client_name&needs_client_redirection&UserName → 200/);
+      for (const secret of ['jeton', 'bon-mot-de-passe', 'mateo.durand', 'assertion']) assert.ok(!d.includes(secret), `« ${secret} » ne doit pas apparaître`);
+      return true;
+    });
+  } finally {
+    ent.fermer();
+  }
+});

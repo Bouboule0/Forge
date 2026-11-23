@@ -10,6 +10,8 @@
 //
 // Ce n'est PAS une API officielle : si le CESI change ses pages, la connexion peut cesser de marcher.
 
+import * as http from 'http';
+import * as https from 'https';
 import { parse, type HTMLElement } from 'node-html-parser';
 import { coursDepuisEnt, type Cours } from './emploiDuTemps';
 
@@ -51,11 +53,48 @@ interface Cookie {
   chemin: string;
 }
 
+/**
+ * Découpe une ligne Set-Cookie qui en contiendrait plusieurs (certaines couches réseau les fusionnent
+ * avec des virgules). Les virgules des dates « Expires=Thu, 01 Jan… » ne sont pas des séparateurs.
+ */
+export function separerSetCookie(ligne: string): string[] {
+  return ligne.split(/,(?=\s*[!#$%&'*+\-.^_`|~0-9A-Za-z]+=)/).map((x) => x.trim()).filter(Boolean);
+}
+
+/** « ?a=1&b=2 » → « ?a&b » : on garde les noms des paramètres, jamais leurs valeurs. */
+function parametres(u: URL): string {
+  const noms = [...new Set([...u.searchParams.keys()])];
+  return noms.length ? `?${noms.join('&')}` : '';
+}
+
+interface ReponseBrute {
+  statut: number;
+  entetes: http.IncomingHttpHeaders;
+  texte: string;
+}
+
+/** Requête HTTP(S) avec le module de Node (les en-têtes Set-Cookie arrivent intacts, un par cookie). */
+function requeteBrute(u: URL, methode: string, entetes: Record<string, string>, corps?: string): Promise<ReponseBrute> {
+  return new Promise((resolve, reject) => {
+    const module = u.protocol === 'https:' ? https : http;
+    const req = module.request(u, { method: methode, headers: corps !== undefined ? { ...entetes, 'Content-Length': String(Buffer.byteLength(corps)) } : entetes }, (res) => {
+      const morceaux: Buffer[] = [];
+      res.on('data', (m: Buffer) => morceaux.push(m));
+      res.on('end', () => resolve({ statut: res.statusCode ?? 0, entetes: res.headers, texte: Buffer.concat(morceaux).toString('utf8') }));
+      res.on('error', reject);
+    });
+    req.setTimeout(30_000, () => req.destroy(new Error('Délai dépassé (30 s) : le serveur ne répond pas.')));
+    req.on('error', reject);
+    if (corps !== undefined) req.write(corps);
+    req.end();
+  });
+}
+
 export class Navigateur {
   private cookies: Cookie[] = [];
   readonly journal: string[] = [];
 
-  constructor(private readonly adresses: AdressesEnt, private readonly agent = 'Forge (extension VS Code de révision)') {}
+  constructor(private readonly adresses: AdressesEnt, private readonly agent = 'Mozilla/5.0 (compatible; Forge/1.1; extension VS Code de révision)') {}
 
   verifierAdresse(url: string): URL {
     const u = new URL(url);
@@ -68,16 +107,17 @@ export class Navigateur {
     return u;
   }
 
-  private enTete(u: URL): string {
+  private cookiesPour(u: URL): Cookie[] {
     const hote = u.hostname.toLowerCase();
     return this.cookies
-      .filter((c) => (c.sousDomaines ? hote === c.domaine || hote.endsWith(`.${c.domaine}`) : hote === c.domaine) && u.pathname.startsWith(c.chemin))
-      .map((c) => `${c.nom}=${c.valeur}`)
-      .join('; ');
+      .filter((c) => (c.sousDomaines ? hote === c.domaine || hote.endsWith(`.${c.domaine}`) : hote === c.domaine) && cheminCorrespond(u.pathname, c.chemin))
+      .sort((a, b) => b.chemin.length - a.chemin.length); // le plus précis d'abord, comme un navigateur
   }
 
-  private enregistrerCookies(u: URL, entetes: Headers): void {
-    for (const brut of entetes.getSetCookie()) {
+  /** Enregistre les cookies reçus ; renvoie leurs noms (pour le journal). */
+  private enregistrerCookies(u: URL, lignes: string[]): string[] {
+    const noms: string[] = [];
+    for (const brut of lignes.flatMap(separerSetCookie)) {
       const [paire, ...attributs] = brut.split(';');
       const egal = paire.indexOf('=');
       if (egal <= 0) continue;
@@ -85,7 +125,8 @@ export class Navigateur {
       const valeur = paire.slice(egal + 1).trim();
       let domaine = u.hostname.toLowerCase();
       let sousDomaines = false;
-      let chemin = '/';
+      // Chemin par défaut : le « dossier » de l'adresse (règle des navigateurs)
+      let chemin = u.pathname.includes('/', 1) ? u.pathname.slice(0, u.pathname.lastIndexOf('/')) : '/';
       let expire = false;
       for (const a of attributs) {
         const [cle, ...reste] = a.trim().split('=');
@@ -93,13 +134,15 @@ export class Navigateur {
         if (/^domain$/i.test(cle) && v) {
           domaine = v.replace(/^\./, '').toLowerCase();
           sousDomaines = true;
-        } else if (/^path$/i.test(cle) && v) chemin = v;
+        } else if (/^path$/i.test(cle) && v.startsWith('/')) chemin = v;
         else if (/^max-age$/i.test(cle) && Number(v) <= 0) expire = true;
         else if (/^expires$/i.test(cle) && Date.parse(v) < Date.now()) expire = true;
       }
       this.cookies = this.cookies.filter((c) => !(c.nom === nom && c.domaine === domaine && c.chemin === chemin));
       if (!expire) this.cookies.push({ nom, valeur, domaine, sousDomaines, chemin });
+      noms.push(expire ? `${nom}(effacé)` : nom);
     }
+    return noms;
   }
 
   /** Requête avec suivi des redirections (chaque étape est vérifiée). */
@@ -108,28 +151,50 @@ export class Navigateur {
     let methode = options.methode ?? 'GET';
     let corps: string | undefined = options.formulaire ? new URLSearchParams(options.formulaire).toString() : undefined;
     for (let saut = 0; saut < 15; saut++) {
-      const entetes: Record<string, string> = { 'User-Agent': this.agent, Accept: 'text/html,application/json;q=0.9,*/*;q=0.8' };
-      const cookies = this.enTete(u);
-      if (cookies) entetes.Cookie = cookies;
+      const entetes: Record<string, string> = {
+        'User-Agent': this.agent,
+        Accept: 'text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'fr-FR,fr;q=0.9',
+        'Accept-Encoding': 'identity',
+      };
+      const envoyes = this.cookiesPour(u);
+      if (envoyes.length) entetes.Cookie = envoyes.map((c) => `${c.nom}=${c.valeur}`).join('; ');
       if (corps !== undefined) entetes['Content-Type'] = 'application/x-www-form-urlencoded';
-      // Le journal ne contient jamais le corps (il peut contenir le mot de passe)
-      this.journal.push(`${methode} ${u.origin}${u.pathname}`);
-      const r = await fetch(u, { method: methode, headers: entetes, body: corps, redirect: 'manual' });
-      this.enregistrerCookies(u, r.headers);
-      const cible = r.headers.get('location');
-      if (r.status >= 300 && r.status < 400 && cible) {
-        u = this.verifierAdresse(new URL(cible, u).toString());
+      const r = await requeteBrute(u, methode, entetes, corps);
+      const setCookie = r.entetes['set-cookie'];
+      const recus = this.enregistrerCookies(u, Array.isArray(setCookie) ? setCookie : setCookie ? [setCookie] : []);
+      const location = r.entetes.location;
+      // Journal : adresses, statuts et NOMS de cookies seulement (jamais de valeur, jamais le corps)
+      let ligne = `${methode} ${u.origin}${u.pathname}${parametres(u)} → ${r.statut}`;
+      if (location) {
+        try {
+          const l = new URL(location, u);
+          ligne += ` vers ${l.origin}${l.pathname}${parametres(l)}`;
+        } catch {
+          ligne += ' vers (adresse illisible)';
+        }
+      }
+      if (envoyes.length) ligne += ` · cookies envoyés : ${envoyes.map((c) => c.nom).join(', ')}`;
+      if (recus.length) ligne += ` · reçus : ${recus.join(', ')}`;
+      this.journal.push(ligne);
+      if (r.statut >= 300 && r.statut < 400 && location) {
+        u = this.verifierAdresse(new URL(location, u).toString());
         // Après une redirection 301/302/303, on repart en GET sans corps (comme un navigateur)
-        if (r.status !== 307 && r.status !== 308) {
+        if (r.statut !== 307 && r.statut !== 308) {
           methode = 'GET';
           corps = undefined;
         }
         continue;
       }
-      return { url: u.toString(), statut: r.status, texte: await r.text() };
+      return { url: u.toString(), statut: r.statut, texte: r.texte };
     }
     throw new ErreurEnt('Trop de redirections.', 'navigation');
   }
+}
+
+function cheminCorrespond(chemin: string, cookie: string): boolean {
+  if (chemin === cookie || cookie === '/') return true;
+  return chemin.startsWith(cookie) && (cookie.endsWith('/') || chemin[cookie.length] === '/');
 }
 
 // --------------------------------------------------------------------------
@@ -326,6 +391,21 @@ function formulaireConnexion(page: Page): string | undefined {
 
 async function connexionVariante(email: string, motDePasse: string, adresses: AdressesEnt, champ: ChampRetour): Promise<SessionEnt> {
   const nav = new Navigateur(adresses);
+  try {
+    return await etapesConnexion(nav, email, motDePasse, adresses, champ);
+  } catch (e) {
+    // On joint au diagnostic le parcours requête par requête (adresses, statuts, noms de cookies)
+    if (e instanceof ErreurEnt && !e.identifiantsRefuses) {
+      const parcours = nav.journal.slice(-40).map((l, i) => `${i + 1}. ${l}`).join('\n');
+      const enrichie = new ErreurEnt(e.message, e.etape, false, `${e.diagnostic ?? ''}\n\nParcours (${champ}) :\n${parcours}`);
+      (enrichie as ErreurEnt & { retourAccepte?: boolean }).retourAccepte = (e as ErreurEnt & { retourAccepte?: boolean }).retourAccepte;
+      throw enrichie;
+    }
+    throw e;
+  }
+}
+
+async function etapesConnexion(nav: Navigateur, email: string, motDePasse: string, adresses: AdressesEnt, champ: ChampRetour): Promise<SessionEnt> {
 
   // 1. Accueil de l'ENT
   const accueil = await suivrePagesAutomatiques(nav, await nav.requete(`${adresses.ent}/`));
