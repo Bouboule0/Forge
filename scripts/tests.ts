@@ -465,7 +465,9 @@ test('les scripts des webviews sont du JavaScript valide', async () => {
   const { html: htmlImport } = await import('../src/vues/ecranImport');
   const { html: htmlPapier } = await import('../src/vues/ecranPapier');
   const { html: htmlFerme } = await import('../src/vues/ecranFerme');
-  for (const page of [htmlSeance({ cspSource: 'x' }), htmlImport({ cspSource: 'x' }, { prosits: [], notions: [] }), htmlPapier({ cspSource: 'x' }), htmlFerme({ cspSource: 'x' })]) {
+  const { html: htmlCctl } = await import('../src/vues/ecranCctl');
+  const { html: htmlStats } = await import('../src/vues/ecranStats');
+  for (const page of [htmlSeance({ cspSource: 'x' }), htmlImport({ cspSource: 'x' }, { prosits: [], notions: [] }), htmlPapier({ cspSource: 'x' }), htmlFerme({ cspSource: 'x' }), htmlCctl({ cspSource: 'x' }), htmlStats({ cspSource: 'x' })]) {
     const script = page.match(/<script nonce="[^"]+">([\s\S]*?)<\/script>/)?.[1];
     assert.ok(script, 'script trouvé');
     assert.doesNotThrow(() => new Function(script!), 'erreur de syntaxe dans le script de la webview');
@@ -696,4 +698,100 @@ test('séance : le bilan compte les pièces gagnées', async () => {
   const x = (await seance.suivant())!;
   await seance.repondre(x.exercice.options ? { type: 'option', index: x.exercice.bonneOption! } : { type: 'texte', valeur: x.exercice.attendu ?? '' });
   assert.equal(seance.terminer().pieces, 5);
+});
+
+// --------------------------------------------------------------------------
+// Phase 6 : examens, CCTL blanc, statistiques
+
+import { ajouterExamen, aRevoirAujourdhui, dernieresActivites, examenQuiPresse, joursAvant, lireExamens, supprimerExamen } from '../src/core/examens';
+import { corrigerCctl, enregistrerCctl, genererCctl } from '../src/core/cctl';
+import { calculerStatistiques } from '../src/core/statistiques';
+import { lireDateSaisie } from '../src/examens';
+import { dansPerimetre } from '../src/core/seance';
+
+test('examens : saisie de date, ajout, suppression, compte à rebours', () => {
+  assert.equal(lireDateSaisie('12/01/2027', '2026-11-22'), '2027-01-12');
+  assert.equal(lireDateSaisie('12/01', '2026-11-22'), '2027-01-12', 'sans année : la prochaine fois');
+  assert.equal(lireDateSaisie('05/12', '2026-11-22'), '2026-12-05');
+  assert.equal(lireDateSaisie('2026-12-05'), '2026-12-05');
+  assert.equal(lireDateSaisie('32/01/2027'), null);
+  const coffre = coffreTemporaire();
+  const e = ajouterExamen(coffre, { titre: 'CCTL POO', type: 'cctl', date: '2026-12-10', prosits: ['P04 - Titre 4'] });
+  assert.equal(joursAvant(e, '2026-11-22'), 18);
+  assert.equal(lireExamens(coffre).length, 1);
+  supprimerExamen(coffre, e.id);
+  assert.equal(lireExamens(coffre).length, 0);
+});
+
+test('examens : les notions au programme reviennent plus souvent à l’approche', () => {
+  const examen = { id: 'e', titre: 'CCTL', type: 'cctl' as const, date: '2026-12-01', prosits: ['P04 - Moteur'] };
+  const notion = (prochaine: string | null, derniere: string | null, prosits = ['P04 - Moteur']) =>
+    ({ nom: 'N', prosits, etat: { ...etat(3), prochaine, derniere } }) as any;
+  const vide = new Map<string, string>();
+  // Prochaine révision après l'examen, revue il y a longtemps : à revoir
+  assert.ok(examenQuiPresse(notion('2026-12-20', '2026-11-10'), [examen], vide, '2026-11-22'));
+  // Déjà prévue avant l'examen : la répétition espacée s'en charge
+  assert.equal(examenQuiPresse(notion('2026-11-28', '2026-11-10'), [examen], vide, '2026-11-22'), undefined);
+  // Revue hier, examen dans 9 jours (écart de 3 jours) : pas encore
+  assert.equal(examenQuiPresse(notion('2026-12-20', '2026-11-21'), [examen], vide, '2026-11-22'), undefined);
+  // La veille de l'examen : écart d'un jour seulement
+  assert.ok(examenQuiPresse(notion('2026-12-20', '2026-11-29'), [examen], vide, '2026-11-30'));
+  // Pas au programme, ou examen trop lointain : rien
+  assert.equal(examenQuiPresse(notion('2026-12-20', null, ['P01']), [examen], vide, '2026-11-22'), undefined);
+  assert.equal(examenQuiPresse(notion('2027-02-20', null), [{ ...examen, date: '2027-02-01' }], vide, '2026-11-22'), undefined);
+  // Un entraînement récent (historique) compte comme activité
+  const activites = dernieresActivites([{ date: '2026-11-21T10:00:00', notion: 'N', type: 'trou', resultat: 'reussite', compte: false }]);
+  assert.equal(aRevoirAujourdhui(notion('2026-12-20', '2026-11-01'), [examen], activites, '2026-11-22'), false);
+});
+
+test('périmètres : plusieurs Prosits, liste de notions', () => {
+  const n = { nom: 'Template', prosits: ['P03 - A', 'P04 - B'] } as any;
+  assert.ok(dansPerimetre(n, { type: 'prosits', noms: ['P04 - B'], titre: 'x' }));
+  assert.ok(!dansPerimetre(n, { type: 'prosits', noms: ['P01'], titre: 'x' }));
+  assert.ok(dansPerimetre(n, { type: 'notions', noms: ['Template'], titre: 'x' }));
+});
+
+test('CCTL blanc : questions des notes et de l’IA, note sur 20, compte rendu, pièces', async () => {
+  const coffre = coffreAvecNotions();
+  enregistrerPiste(lirePistesCoffre(coffre)[0].chemin, 0, 'partielle', 'Vrai pour le dynamique');
+  const ia = iaScriptee([{ questions: [
+    { question: 'Que fait `virtual` ?', propositions: ['Liaison dynamique', 'Rien', 'Copie', 'Erreur'], bonne: 0, explication: 'Appel résolu à l’exécution.', notion: 'Polymorphisme' },
+    { question: 'Mal formée', propositions: ['a', 'a', 'b', 'c'], bonne: 0 },
+  ] }]);
+  const questions = await genererCctl(coffre, { type: 'tout' }, 8, { client: ia.client, hasard: hasardFixe() });
+  assert.equal(questions.length, 8);
+  assert.equal(questions.filter((q) => q.source === 'ia').length, 1, 'la question mal formée est écartée');
+  assert.equal(questions.filter((q) => q.source === 'piste').length, 1);
+  for (const q of questions) assert.ok(q.bonne >= 0 && q.bonne < q.options.length);
+
+  const reponses = questions.map((q, i) => (i < 6 ? q.bonne : null));
+  const r = corrigerCctl(questions, reponses);
+  assert.deepEqual([r.bonnes, r.total, r.note, r.erreurs], [6, 8, 15, [6, 7]]);
+  const chemin = enregistrerCctl(coffre, 'Essai', questions, reponses, r, 12);
+  assert.match(fs.readFileSync(chemin, 'utf8'), /15\/20[\s\S]*Questions ratées[\s\S]*Ta réponse : _\(aucune\)_/);
+  assert.equal(vueFerme(coffre).gagnees, 30, '2 × la note en pièces');
+});
+
+test('statistiques : activité, prévision, paliers, réussite par type, AAV, CER, examens', () => {
+  const coffre = coffreAvecNotions();
+  const date = aujourdhui();
+  ajouterHistorique(coffre, { date: new Date().toISOString(), notion: 'Template', type: 'trou', resultat: 'reussite', compte: true });
+  ajouterHistorique(coffre, { date: new Date().toISOString(), notion: 'Template', type: 'trou', resultat: 'echec', compte: true });
+  ajouterHistorique(coffre, { date: new Date().toISOString(), notion: 'Surcharge', type: 'code', resultat: 'reussite', compte: true });
+  const n = lireNotionsRevision(coffre).find((x) => x.nom === 'Surcharge')!;
+  enregistrerEtatTest(n.chemin, 5, '2099-01-01');
+  ajouterExamen(coffre, { titre: 'CCTL', type: 'cctl', date: ajouterJours(date, 10), prosits: ['P04 - Titre 4'] });
+
+  const s = calculerStatistiques(coffre, date);
+  assert.equal(s.activite.length, 30);
+  assert.deepEqual(s.activite[29], { date, total: 3, reussis: 2 });
+  assert.equal(s.exercicesSemaine, 3);
+  assert.equal(s.reussite30, 67);
+  assert.equal(s.prevision[0].nombre, 4, 'les 4 autres notions sont à revoir aujourd’hui');
+  assert.deepEqual(s.maitriseParProsit[0], { prosit: 'P04 - Titre 4', total: 5, paliers: [4, 0, 0, 1] });
+  assert.deepEqual(s.parType.map((t) => [t.type, t.total, t.taux]), [['trou', 2, 50], ['code', 1, 100]]);
+  assert.equal(s.aav.find((a) => a.niveau === 2)!.total, 5);
+  assert.deepEqual(s.cer, [{ prosit: 'P04 - Titre 4', total: 1, validees: 0 }]);
+  assert.deepEqual([s.examens[0].jours, s.examens[0].programme], [10, 5]);
+  assert.equal(s.maitrisees, 1);
 });

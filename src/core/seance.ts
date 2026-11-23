@@ -32,8 +32,16 @@ import { ajouterJours, appliquerResultat, estARevoir, type Changement } from './
 import type { CorrecteurIA } from './correctionIA';
 import { aujourdhui, normaliser } from './texte';
 import { piecesGagnees } from './ferme';
+import { aRevoirAujourdhui, dernieresActivites, examenQuiPresse, lireExamens, type Examen } from './examens';
 
-export type Perimetre = { type: 'tout' } | { type: 'prosit'; nom: string } | { type: 'notion'; nom: string };
+export type Perimetre =
+  | { type: 'tout' }
+  | { type: 'prosit'; nom: string }
+  | { type: 'notion'; nom: string }
+  /** Plusieurs Prosits (le programme d'un examen) */
+  | { type: 'prosits'; noms: string[]; titre: string }
+  /** Une liste de notions (par exemple les erreurs d'un examen blanc) */
+  | { type: 'notions'; noms: string[]; titre: string };
 
 export interface OptionsSeance {
   rapide: boolean;
@@ -92,16 +100,25 @@ const JOURS_ENTRE_PISTES = 7;
 /** Une piste est glissée après ce nombre de notions. */
 const NOTIONS_PAR_PISTE = 3;
 
+/** Nom lisible d'un périmètre (titre des séances). */
+export function nomPerimetre(p: Perimetre): string {
+  if (p.type === 'tout') return '';
+  return p.type === 'prosits' || p.type === 'notions' ? p.titre : p.nom;
+}
+
 export function dansPerimetre(n: NotionRevision, p: Perimetre): boolean {
   if (p.type === 'tout') return true;
   if (p.type === 'notion') return n.nom === p.nom;
-  return n.prosits.some((x) => normaliser(x) === normaliser(p.nom));
+  if (p.type === 'notions') return p.noms.includes(n.nom);
+  const noms = p.type === 'prosits' ? p.noms : [p.nom];
+  return n.prosits.some((x) => noms.some((y) => normaliser(x) === normaliser(y)));
 }
 
-function pisteDansPerimetre(piste: PisteRevision, p: Perimetre): boolean {
+export function pisteDansPerimetre(piste: PisteRevision, p: Perimetre): boolean {
   if (p.type === 'tout') return true;
-  if (p.type === 'notion') return false;
-  return normaliser(piste.prosit) === normaliser(p.nom);
+  if (p.type === 'notion' || p.type === 'notions') return false;
+  const noms = p.type === 'prosits' ? p.noms : [p.nom];
+  return noms.some((y) => normaliser(piste.prosit) === normaliser(y));
 }
 
 const clePiste = (p: PisteRevision) => `piste:${p.id}`;
@@ -118,6 +135,8 @@ export class Seance {
   readonly bilan: Bilan = { faits: 0, reussis: 0, echecs: 0, montees: [], descentes: [], verifiees: 0, pistesValidees: 0, pieces: 0, restants: 0, serie: 0 };
   private niveauxDepart = new Map<string, number>();
   private piecesDepart = 0;
+  private readonly examens: Examen[];
+  private readonly activites: Map<string, string>;
 
   constructor(
     private readonly coffre: string,
@@ -130,13 +149,16 @@ export class Seance {
     this.notions = lireNotionsRevision(coffre);
     this.pistes = lirePistesCoffre(coffre);
     for (const n of this.notions) this.niveauxDepart.set(n.chemin, n.etat.niveau);
-    this.piecesDepart = piecesGagnees(lireHistorique(coffre));
+    const historique = lireHistorique(coffre);
+    this.piecesDepart = piecesGagnees(historique);
+    this.examens = lireExamens(coffre);
+    this.activites = dernieresActivites(historique);
     this.remplirFile();
   }
 
   /** Notions du périmètre à revoir aujourd'hui. */
   aRevoir(): NotionRevision[] {
-    return this.notions.filter((n) => dansPerimetre(n, this.options.perimetre) && estARevoir(n.etat, this.date));
+    return this.notions.filter((n) => dansPerimetre(n, this.options.perimetre) && aRevoirAujourdhui(n, this.examens, this.activites, this.date));
   }
 
   /** Pistes proposées dans cette séance : à valider (avec l'IA), ou validées pas revues depuis une semaine. */
@@ -174,9 +196,10 @@ export class Seance {
     if (this.options.entrainement) {
       notions = this.melanger(this.notions.filter((n) => dansPerimetre(n, this.options.perimetre))).sort((a, b) => a.etat.niveau - b.etat.niveau);
     } else {
-      notions = this.melanger(this.aRevoir()).sort(
-        (a, b) => (a.etat.prochaine ?? '').localeCompare(b.etat.prochaine ?? '') || a.etat.niveau - b.etat.niveau,
-      );
+      // D'abord les révisions en retard, puis celles imposées par un examen proche (le plus proche d'abord)
+      const cle = (n: NotionRevision) =>
+        estARevoir(n.etat, this.date) ? n.etat.prochaine ?? '' : examenQuiPresse(n, this.examens, this.activites, this.date)?.date ?? '9999';
+      notions = this.melanger(this.aRevoir()).sort((a, b) => cle(a).localeCompare(cle(b)) || a.etat.niveau - b.etat.niveau);
     }
     // Les pistes à valider d'abord (elles complètent le CER), puis les autres
     const pistes = this.melanger(this.pistesAProposer()).sort((a, b) => Number(b.statut === 'a_valider') - Number(a.statut === 'a_valider'));

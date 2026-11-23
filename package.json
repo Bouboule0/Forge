@@ -2,7 +2,7 @@
   "name": "forge",
   "displayName": "Forge — Révision par l'action",
   "description": "Transforme tes Prosits et CER (CESI) en second cerveau Obsidian et t'aide à réviser en codant.",
-  "version": "0.5.0",
+  "version": "1.0.0",
   "publisher": "bouboule0",
   "license": "MIT",
   "repository": {
@@ -33,6 +33,22 @@
         "title": "Ma ferme",
         "category": "Forge",
         "icon": "$(home)"
+      },
+      {
+        "command": "forge.statistiques",
+        "title": "Statistiques",
+        "category": "Forge",
+        "icon": "$(graph)"
+      },
+      {
+        "command": "forge.examens",
+        "title": "Mes examens (préparer un CCTL ou une étude de cas)",
+        "category": "Forge"
+      },
+      {
+        "command": "forge.cctlBlanc",
+        "title": "Examen blanc CCTL (questionnaire chronométré)",
+        "category": "Forge"
       },
       {
         "command": "forge.verifierInstallation",
@@ -104,6 +120,11 @@
       {
         "command": "forge.etudeDeCas",
         "title": "Étude de cas sur papier (chronométrée)",
+        "category": "Forge"
+      },
+      {
+        "command": "forge.priseEnMain",
+        "title": "Prise en main",
         "category": "Forge"
       }
     ],
@@ -220,6 +241,92 @@
         "mac": "cmd+alt+v",
         "when": "editorTextFocus && resourceExtname =~ /\\.(cpp|hpp|h)$/"
       }
+    ],
+    "walkthroughs": [
+      {
+        "id": "forge.priseEnMain",
+        "title": "Bien démarrer avec Forge",
+        "description": "Ton second cerveau de révision, de l'import des CER à la ferme.",
+        "steps": [
+          {
+            "id": "installation",
+            "title": "Vérifier l'installation",
+            "description": "Compilateur C++ (WSL), pandoc, git.\n[Vérifier l'installation](command:forge.verifierInstallation)",
+            "media": {
+              "markdown": "media/prise-en-main/1-installation.md"
+            },
+            "completionEvents": [
+              "onCommand:forge.verifierInstallation"
+            ]
+          },
+          {
+            "id": "coffre",
+            "title": "Créer ton second cerveau",
+            "description": "Le dossier Obsidian où vivront tes notes.\n[Créer mon coffre](command:forge.choisirCoffre)",
+            "media": {
+              "markdown": "media/prise-en-main/2-coffre.md"
+            },
+            "completionEvents": [
+              "onSettingChanged:forge.cheminCoffre"
+            ]
+          },
+          {
+            "id": "import",
+            "title": "Importer tes CER",
+            "description": "Tes Word deviennent des notes reliées.\n[Importer mes CER](command:forge.importer)",
+            "media": {
+              "markdown": "media/prise-en-main/3-import.md"
+            },
+            "completionEvents": [
+              "onCommand:forge.importer"
+            ]
+          },
+          {
+            "id": "ia",
+            "title": "Ajouter l'IA (facultatif)",
+            "description": "Corrections, exercices de code, études de cas.\n[Configurer la clé DeepSeek](command:forge.configurerCleDeepSeek)",
+            "media": {
+              "markdown": "media/prise-en-main/4-ia.md"
+            },
+            "completionEvents": [
+              "onCommand:forge.configurerCleDeepSeek"
+            ]
+          },
+          {
+            "id": "reviser",
+            "title": "Réviser",
+            "description": "Ctrl+Alt+R, à tout moment.\n[Lancer une séance](command:forge.reviser)",
+            "media": {
+              "markdown": "media/prise-en-main/5-reviser.md"
+            },
+            "completionEvents": [
+              "onCommand:forge.reviser"
+            ]
+          },
+          {
+            "id": "ferme",
+            "title": "Ta ferme",
+            "description": "Plante tes notions et fais-les pousser.\n[Ouvrir ma ferme](command:forge.ferme)",
+            "media": {
+              "markdown": "media/prise-en-main/6-ferme.md"
+            },
+            "completionEvents": [
+              "onCommand:forge.ferme"
+            ]
+          },
+          {
+            "id": "examens",
+            "title": "Préparer un examen",
+            "description": "CCTL blanc, étude de cas blanche, statistiques.\n[Mes examens](command:forge.examens)",
+            "media": {
+              "markdown": "media/prise-en-main/7-examens.md"
+            },
+            "completionEvents": [
+              "onCommand:forge.examens"
+            ]
+          }
+        ]
+      }
     ]
   },
   "scripts": {
@@ -246,5 +353,19 @@
     "@vscode/vsce": "^3.0.0",
     "esbuild": "^0.25.0",
     "typescript": "^5.6.0"
-  }
+  },
+  "icon": "media/icone.png",
+  "galleryBanner": {
+    "color": "#3b2a1e",
+    "theme": "dark"
+  },
+  "keywords": [
+    "révision",
+    "CESI",
+    "Prosit",
+    "Obsidian",
+    "C++",
+    "répétition espacée",
+    "flashcards"
+  ]
 }

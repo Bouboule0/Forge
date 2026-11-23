@@ -1,5 +1,7 @@
 # 🔨 Forge
 
+<img src="media/icone.png" width="96" alt="Icône de Forge : un pommier pixel-art">
+
 Extension VS Code pour réviser **en agissant** les notions vues en Prosit au CESI.
 
 Tes CER deviennent un **second cerveau Obsidian** : une note par Prosit, une note par notion, toutes reliées entre elles. VS Code devient ton terrain d'entraînement (exercices de code C++, textes à trous, explications…). Tes révisions font pousser une ferme pixel-art.
@@ -16,9 +18,9 @@ Le plan complet est dans [`docs/PLAN.md`](docs/PLAN.md).
 | 3. IA (DeepSeek) | Relecture des définitions, explications corrigées, pistes de solutions | ✅ |
 | 4. Code | Exercices C++ compilés et testés, prédis la sortie, trouve le bug, mini-projets, mode papier | ✅ |
 | 5. Ferme | Ferme pixel-art que tu aménages toi-même | ✅ |
-| 6. Finitions | Mode examen (CCTL, étude de cas), statistiques, `.vsix` | ⏳ |
+| 6. Finitions | Mode examen (CCTL, étude de cas), statistiques, prise en main, `.vsix` | ✅ |
 
-Ces six phases sont les **phases principales** du projet. D'autres idées viendront ensuite sous forme de **phases annexes**.
+Ces six phases sont les **phases principales** du projet : elles sont terminées (version 1.0.0). D'autres idées viendront ensuite sous forme de **phases annexes** (par exemple : exercices UML avec Mermaid).
 
 ---
 
@@ -96,7 +98,9 @@ Ouvre ensuite la **vue graphe** (Ctrl+G) : chaque notion est colorée selon ta m
 npm run package
 ```
 
-Puis, dans VS Code : panneau Extensions → `…` → **Installer depuis un VSIX…** → `forge-0.1.0.vsix`.
+Puis, dans VS Code : panneau Extensions → `…` → **Installer depuis un VSIX…** → `forge-1.0.0.vsix`.
+
+> Le `.vsix` est aussi fabriqué automatiquement par GitHub à chaque pull request (onglet **Actions** → **Vérification** → artefact `forge-vsix`).
 
 ---
 
@@ -229,12 +233,28 @@ Ouvre-la avec 🌻 dans la barre d'état, **Forge : Ma ferme**, ou le bouton en 
 - Clic sur une plante : la réviser, ouvrir sa note, la déplacer. Clic sur une décoration : la déplacer ou la ranger (onglet 🎒).
 - 📸 **Photo pour Obsidian** : enregistre `Ferme.md` + l'image dans ton coffre.
 
+## 📅 Préparer un examen
+
+`Ctrl+Shift+P` → **Forge : Mes examens** → **➕ Ajouter un examen** : type (CCTL ou étude de cas), nom, date, Prosits au programme.
+
+- **Révision resserrée** : dans les 3 semaines avant l'examen, les notions au programme reviennent de plus en plus souvent (même si la répétition espacée les avait prévues après l'examen). La barre d'état affiche le compte à rebours (`📅 J-12`).
+- **📝 CCTL blanc** (aussi **Forge : Examen blanc CCTL**) : 10, 20 ou 30 questions chronométrées, comme le vrai : une question par page, navigation libre, **note sur 20 et correction seulement à la fin**. Les questions viennent de tes notes (QCM sur les notions), de tes pistes validées, et de l'IA (comportement du C++) si ta clé est enregistrée. Ensuite : « Réviser les notions ratées », et un compte rendu dans `Exercices/Examens blancs/`.
+- **📄 Étude de cas blanche** : le mode papier sur tout le programme de l'examen.
+
+## 📊 Statistiques
+
+`Ctrl+Shift+P` → **Forge : Statistiques** : notions maîtrisées, série, exercices de la semaine, réussite sur 30 jours, activité jour par jour, révisions prévues, maîtrise par Prosit, réussite par type d'exercice, objectifs (AAV) prouvés, avancement des tableaux de validation de tes CER, notions fragiles (avec « Réviser »), examens à venir. Survole les graphiques pour le détail ; chaque graphique a aussi sa version en tableau.
+
 ## 🧭 Les commandes
 
 | Commande | Ce qu'elle fait |
 |---|---|
 | Forge : Réviser | Lance une séance (Ctrl+Alt+R) |
 | Forge : Ma ferme | Ta ferme pixel-art (aussi 🌻 dans la barre d'état) |
+| Forge : Statistiques | Tableau de bord de ta progression |
+| Forge : Mes examens | Ajouter un examen, réviser son programme, CCTL blanc, étude de cas blanche |
+| Forge : Examen blanc CCTL | Questionnaire chronométré noté sur 20 |
+| Forge : Prise en main | Le guide pas à pas dans VS Code |
 | Forge : Vérifier l'installation | Teste `wsl g++` (compile et lance « Hello Forge »), pandoc et git |
 | Forge : Créer / choisir le coffre Obsidian | Crée les dossiers et règle les couleurs du graphe |
 | Forge : Importer des CER / Prosits (.docx) | Lit tes Word et crée les notes, après l'écran de validation |
@@ -303,6 +323,6 @@ npm run essai-import -- ./coffre-test chemin/vers/CER.docx
 | Dossier | Contenu |
 |---|---|
 | `src/core/` | Logique sans VS Code : import, coffre, export Word, répétition espacée, exercices, pistes, séance, corrections IA, compilation, exercices de code, études de cas |
-| `src/vues/` | Webviews (écran de validation, séance, étude de cas sur papier, ferme et ses sprites) |
+| `src/vues/` | Webviews (validation, séance, étude de cas, CCTL blanc, statistiques, ferme et ses sprites) |
 | `src/extension.ts` | Commandes VS Code |
 | `scripts/` | Tests et essais en ligne de commande |

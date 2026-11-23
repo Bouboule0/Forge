@@ -2,11 +2,11 @@
 
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { cheminDossier, compterNotionsARevoir } from './core/coffre';
-import { lireNotionsRevision } from './core/notionsRevision';
-import { dansPerimetre, type Perimetre } from './core/seance';
+import { cheminDossier } from './core/coffre';
+import { aRevoirAujourdhui, compterARevoir, dernieresActivites, lireExamens } from './core/examens';
+import { lireHistorique, lireNotionsRevision } from './core/notionsRevision';
+import { dansPerimetre, nomPerimetre, pisteDansPerimetre, type Perimetre } from './core/seance';
 import { aujourdhui } from './core/texte';
-import { estARevoir } from './core/repetition';
 import { coffreActuel, compilateur, obtenirCoffre, reglages } from './config';
 import { EcranSeance } from './vues/ecranSeance';
 import { compilateurDisponible, creerAtelier } from './code';
@@ -26,20 +26,27 @@ function perimetreDepuis(coffre: string, uri?: vscode.Uri): Perimetre {
   return { type: 'tout' };
 }
 
-export async function lancerRevision(context: vscode.ExtensionContext, journal: vscode.OutputChannel, uri: vscode.Uri | undefined, surFin: () => void): Promise<void> {
+export async function lancerRevision(
+  context: vscode.ExtensionContext,
+  journal: vscode.OutputChannel,
+  cible: vscode.Uri | Perimetre | undefined,
+  surFin: () => void,
+): Promise<void> {
   const coffre = await obtenirCoffre();
   if (!coffre) return;
-  const perimetre = perimetreDepuis(coffre, uri instanceof vscode.Uri ? uri : undefined);
+  const perimetre: Perimetre = cible && !(cible instanceof vscode.Uri) && 'type' in cible ? cible : perimetreDepuis(coffre, cible instanceof vscode.Uri ? cible : undefined);
   const notions = lireNotionsRevision(coffre).filter((n) => dansPerimetre(n, perimetre));
   if (notions.length === 0) {
     const r = await vscode.window.showInformationMessage('Aucune notion à réviser pour le moment. Importe d\'abord tes CER.', 'Importer mes CER');
     if (r) vscode.commands.executeCommand('forge.importer');
     return;
   }
-  const aRevoir = notions.filter((n) => estARevoir(n.etat)).length;
+  const examens = lireExamens(coffre);
+  const activites = dernieresActivites(lireHistorique(coffre));
+  const aRevoir = notions.filter((n) => aRevoirAujourdhui(n, examens, activites)).length;
   const client = await clientIA(context, false);
-  const pistesAValider = perimetre.type === 'notion' ? 0 : lirePistesCoffre(coffre).filter((p) => p.statut === 'a_valider' && (perimetre.type === 'tout' || p.prosit === perimetre.nom)).length;
-  const cible = perimetre.type === 'tout' ? '' : ` — ${perimetre.nom}`;
+  const pistesAValider = lirePistesCoffre(coffre).filter((p) => p.statut === 'a_valider' && pisteDansPerimetre(p, perimetre)).length;
+  const titre = perimetre.type === 'tout' ? '' : ` — ${nomPerimetre(perimetre)}`;
   // Exercices de code : il faut un compilateur, et l'IA ou des exercices déjà générés
   const compilateurOk = await compilateurDisponible();
   const exercicesEnStock = listerExercices(coffre).filter((e) => e.statut !== 'reussi').length;
@@ -84,7 +91,7 @@ export async function lancerRevision(context: vscode.ExtensionContext, journal: 
     entrainement: true,
   });
 
-  const choisi = await vscode.window.showQuickPick(choix, { title: `🌱 Réviser${cible}`, placeHolder: 'Quel type de séance ?' });
+  const choisi = await vscode.window.showQuickPick(choix, { title: `🌱 Réviser${titre}`, placeHolder: 'Quel type de séance ?' });
   if (!choisi) return;
   if (choisi.label === '💻 Séance code' && !choisi.code) {
     vscode.commands.executeCommand('forge.verifierInstallation');
@@ -112,7 +119,7 @@ export function suggererRevision(context: vscode.ExtensionContext): void {
   if (!coffre) return;
   const date = aujourdhui();
   if (context.globalState.get('forge.derniereSuggestion') === date) return;
-  const { aRevoir } = compterNotionsARevoir(coffre);
+  const { aRevoir } = compterARevoir(coffre);
   if (aRevoir === 0) return;
   context.globalState.update('forge.derniereSuggestion', date);
   vscode.window

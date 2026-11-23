@@ -1,7 +1,8 @@
 // Indicateur dans la barre d'état : « 🌱 7 à revoir ».
 
 import * as vscode from 'vscode';
-import { compterNotionsARevoir, lireDate, lireNotions } from './core/coffre';
+import { lireDate, lireNotions } from './core/coffre';
+import { compterARevoir, joursAvant } from './core/examens';
 import { aujourdhui } from './core/texte';
 import { coffreActuel } from './config';
 
@@ -35,15 +36,19 @@ export class BarreEtat implements vscode.Disposable {
       this.element.command = 'forge.choisirCoffre';
       return;
     }
-    const { aRevoir, total } = compterNotionsARevoir(coffre);
+    const { aRevoir, total, examen } = compterARevoir(coffre);
     if (total === 0) {
       this.element.text = '🌰 Forge';
       this.element.tooltip = 'Forge : aucune notion pour le moment. Clique pour importer tes CER.';
       this.element.command = 'forge.importer';
       return;
     }
-    this.element.text = aRevoir > 0 ? `🌱 ${aRevoir} à revoir` : '🌳 À jour';
-    this.element.tooltip = `Forge : ${aRevoir} notion(s) à revoir sur ${total} — clique pour réviser`;
+    const jours = examen ? joursAvant(examen) : undefined;
+    const compteur = jours === undefined ? '' : jours === 0 ? ` · 📅 ${examen!.titre} aujourd'hui` : ` · 📅 J-${jours}`;
+    this.element.text = (aRevoir > 0 ? `🌱 ${aRevoir} à revoir` : '🌳 À jour') + compteur;
+    this.element.tooltip =
+      `Forge : ${aRevoir} notion(s) à revoir sur ${total} — clique pour réviser` +
+      (examen ? `\n📅 ${examen.titre} le ${examen.date} : les notions au programme reviennent plus souvent` : '');
     this.element.command = 'forge.reviser';
   }
 
