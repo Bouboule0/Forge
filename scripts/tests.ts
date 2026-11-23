@@ -1013,9 +1013,10 @@ test('ENT CESI : page inconnue → diagnostic utile, sans aucune valeur de champ
 });
 
 /** Faux ENT reproduisant le parcours CESI actuel (diagnostic de novembre 2026) : porte « wayf » de l'ENT, CAS, SAML, ticket. */
-async function fauxEntActuel(options: { perdService?: boolean } = {}) {
+async function fauxEntActuel(options: { perdService?: boolean; apprenant?: 'lien' | 'api' } = {}) {
   let base = '';
   let soumissionsWayf = 0;
+  let deconnexions = 0;
   const serveur = http.createServer();
   serveur.on('request', (req, res) => {
     let brut = '';
@@ -1027,6 +1028,26 @@ async function fauxEntActuel(options: { perdService?: boolean } = {}) {
       const page = (html: string, entetes: Record<string, string> = {}) => { res.writeHead(200, { 'Content-Type': 'text/html', ...entetes }); res.end(html); };
       const rediriger = (vers: string, entetes: Record<string, string> = {}) => { res.writeHead(302, { Location: vers, ...entetes }); res.end(); };
       const service = `${base}/connexion`;
+      // Parcours de ton diagnostic : l'ENT reçoit lui-même le retour SAML, puis /accueil-apprenant
+      if (u.pathname === '/login/ClientIdpViaCesiFr' && corps.SAMLResponse === 'assertion') return rediriger('/', { 'Set-Cookie': 'ENT_SESSION=ok; Path=/' });
+      if (/logout/.test(u.pathname)) {
+        deconnexions++;
+        return rediriger('/', { 'Set-Cookie': 'ENT_SESSION=; Path=/; Max-Age=0' });
+      }
+      if (options.apprenant && u.pathname === '/' && /ENT_SESSION=ok/.test(cookie)) return rediriger('/accueil-apprenant');
+      if (u.pathname === '/accueil-apprenant' && /ENT_SESSION=ok/.test(cookie)) {
+        return page(
+          '<title>Accueil apprenant</title><nav><a href="/accueil-apprenant">Accueil</a><a href="/mes-cours">Mes cours</a>' +
+            (options.apprenant === 'lien' ? '<a href="/emploi-du-temps">Mon emploi du temps</a>' : '<a href="/notes">Mes notes</a>') +
+            '</nav><script>function seDeconnecter() { window.location.href = "/identification/logout"; }</script>',
+        );
+      }
+      if (u.pathname === '/emploi-du-temps' && /ENT_SESSION=ok/.test(cookie)) return page('<div id="agenda"></div><script>var config = {"codePersonne": 555};</script>');
+      if (u.pathname === '/api/seance/all' && /ENT_SESSION=ok/.test(cookie) && options.apprenant) {
+        if (options.apprenant === 'lien' && u.searchParams.get('codePersonne') !== '555') { res.writeHead(400); return res.end('code ?'); }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify(SEANCES));
+      }
       if (u.pathname === '/cas/login' && req.method === 'POST' && corps.SAMLResponse === 'assertion') {
         const relais = decodeURIComponent(corps.RelayState ?? '');
         // Sans adresse de retour, le CAS affiche « Connexion réussie » (comme dans ton diagnostic)
@@ -1058,7 +1079,8 @@ async function fauxEntActuel(options: { perdService?: boolean } = {}) {
       }
       if (u.pathname === '/adfs/ls/' && u.searchParams.get('client-request-id') === '7') {
         if (corps.Password !== 'bon-mot-de-passe') return page('<span id="errorText">Mot de passe incorrect.</span>');
-        return page(`<form name="hiddenform" method="post" action="/cas/login?client_name=ClientIdpViaCesiFr"><input type="hidden" name="SAMLResponse" value="assertion"><input type="hidden" name="RelayState" value="${u.searchParams.get('RelayState')}"></form>`);
+        const acs = options.apprenant ? '/login/ClientIdpViaCesiFr' : '/cas/login?client_name=ClientIdpViaCesiFr';
+        return page(`<form name="hiddenform" method="post" action="${acs}"><input type="hidden" name="SAMLResponse" value="assertion"><input type="hidden" name="RelayState" value="${u.searchParams.get('RelayState')}"></form>`);
       }
       if (u.pathname === '/api/seance/all' && connecte && u.searchParams.get('codePersonne') === '777') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1070,7 +1092,7 @@ async function fauxEntActuel(options: { perdService?: boolean } = {}) {
   await new Promise<void>((ok) => serveur.listen(0, '127.0.0.1', ok));
   base = `http://127.0.0.1:${(serveur.address() as { port: number }).port}`;
   const adresses: AdressesEnt = { ent: base, wayf: base, domainesAutorises: ['127.0.0.1'], autoriserHttp: true };
-  return { adresses, soumissionsWayf: () => soumissionsWayf, fermer: () => serveur.close() };
+  return { adresses, soumissionsWayf: () => soumissionsWayf, deconnexions: () => deconnexions, fermer: () => serveur.close() };
 }
 
 test('ENT CESI (parcours actuel) : porte « wayf » de l’ENT, CAS, SAML automatique, ticket', async () => {
@@ -1118,4 +1140,39 @@ test('ENT CESI : le diagnostic contient le parcours (noms de cookies) sans aucun
   } finally {
     ent.fermer();
   }
+});
+
+test('ENT CESI (ton parcours) : /accueil-apprenant, jamais de déconnexion, code personne via le lien « emploi du temps »', async () => {
+  const ent = await fauxEntActuel({ apprenant: 'lien' });
+  try {
+    const s = await connexionEnt('mateo.durand@viacesi.fr', 'bon-mot-de-passe', ent.adresses);
+    assert.equal(s.codePersonne, 555);
+    assert.equal((await seancesEnt(s, '2026-11-23', '2026-12-13', ent.adresses)).length, 2);
+    assert.equal(ent.deconnexions(), 0, 'Forge ne suit jamais l’adresse de déconnexion du script');
+    assert.equal(ent.soumissionsWayf(), 1);
+  } finally {
+    ent.fermer();
+  }
+});
+
+test('ENT CESI (ton parcours) : sans code personne, l’API des séances sans code suffit', async () => {
+  const ent = await fauxEntActuel({ apprenant: 'api' });
+  try {
+    const s = await connexionEnt('mateo.durand@viacesi.fr', 'bon-mot-de-passe', ent.adresses);
+    assert.equal(s.codePersonne, null);
+    assert.equal((await seancesEnt(s, '2026-11-23', '2026-12-13', ent.adresses)).length, 2);
+    assert.equal(ent.deconnexions(), 0);
+  } finally {
+    ent.fermer();
+  }
+});
+
+test('navigation : une adresse de déconnexion est toujours refusée', async () => {
+  const { estDeconnexion, codePersonneDans } = await import('../src/core/entCesi');
+  assert.ok(estDeconnexion('https://ent.cesi.fr/identification/logout'));
+  assert.ok(estDeconnexion('https://sts.viacesi.fr/adfs/ls/?wa=wsignout1.0'));
+  assert.ok(!estDeconnexion('https://ent.cesi.fr/accueil-apprenant'));
+  assert.equal(codePersonneDans({ url: 'https://x', statut: 200, texte: '<script>init({ codePersonne: "123456" })</script>' }), 123456);
+  assert.equal(codePersonneDans({ url: 'https://x', statut: 200, texte: '<div data-code-personne="42"></div>' }), 42);
+  assert.equal(codePersonneDans({ url: 'https://x', statut: 200, texte: '<p>rien</p>' }), null);
 });

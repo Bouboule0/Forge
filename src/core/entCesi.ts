@@ -107,6 +107,14 @@ export class Navigateur {
     return u;
   }
 
+  /** Forge ne doit jamais se déconnecter lui-même (ce qui s'est produit avec un script de la page d'accueil). */
+  private refuserDeconnexion(u: URL): void {
+    if (estDeconnexion(u.toString())) {
+      this.journal.push(`(refusé) ${u.origin}${u.pathname} : adresse de déconnexion`);
+      throw new ErreurEnt('Forge a évité une adresse de déconnexion.', 'navigation');
+    }
+  }
+
   private cookiesPour(u: URL): Cookie[] {
     const hote = u.hostname.toLowerCase();
     return this.cookies
@@ -148,6 +156,7 @@ export class Navigateur {
   /** Requête avec suivi des redirections (chaque étape est vérifiée). */
   async requete(url: string, options: { methode?: 'GET' | 'POST'; formulaire?: Record<string, string> } = {}): Promise<{ url: string; statut: number; texte: string }> {
     let u = this.verifierAdresse(url);
+    this.refuserDeconnexion(u);
     let methode = options.methode ?? 'GET';
     let corps: string | undefined = options.formulaire ? new URLSearchParams(options.formulaire).toString() : undefined;
     for (let saut = 0; saut < 15; saut++) {
@@ -179,6 +188,7 @@ export class Navigateur {
       this.journal.push(ligne);
       if (r.statut >= 300 && r.statut < 400 && location) {
         u = this.verifierAdresse(new URL(location, u).toString());
+        this.refuserDeconnexion(u);
         // Après une redirection 301/302/303, on repart en GET sans corps (comme un navigateur)
         if (r.statut !== 307 && r.statut !== 308) {
           methode = 'GET';
@@ -189,6 +199,14 @@ export class Navigateur {
       return { url: u.toString(), statut: r.statut, texte: r.texte };
     }
     throw new ErreurEnt('Trop de redirections.', 'navigation');
+  }
+}
+
+export function estDeconnexion(url: string): boolean {
+  try {
+    return /log-?out|logoff|sign-?out|d[ée]connexion|deconnecter|wsignout/i.test(new URL(url).pathname + new URL(url).search);
+  } catch {
+    return false;
   }
 }
 
@@ -226,7 +244,8 @@ export function identifiantEnt(prenom: string, nom: string): string {
 export interface SessionEnt {
   navigateur: Navigateur;
   session: string;
-  codePersonne: number;
+  /** null : l'API des séances renvoie directement celles de la personne connectée */
+  codePersonne: number | null;
   prenom: string;
   nom: string;
 }
@@ -293,7 +312,8 @@ async function suivrePagesAutomatiques(nav: Navigateur, page: Page): Promise<Pag
       const caches = champs.filter((c) => (c.getAttribute('type') ?? '').toLowerCase() === 'hidden');
       const saisie = champs.some((c) => /^(text|password|email)$/i.test(c.getAttribute('type') ?? 'text') && (c.getAttribute('type') ?? '').toLowerCase() !== 'hidden');
       const nomsConnus = caches.some((c) => /^(SAMLResponse|SAMLRequest|RelayState|ticket|wresult|wa|code|id_token|state)$/i.test(c.getAttribute('name') ?? ''));
-      return caches.length > 0 && !saisie && nomsConnus;
+      const action = f.getAttribute('action') ?? '';
+      return caches.length > 0 && !saisie && nomsConnus && !estDeconnexion(new URL(action || page.url, page.url).toString());
     });
     if (auto) {
       const valeurs: Record<string, string> = {};
@@ -315,7 +335,10 @@ async function suivrePagesAutomatiques(nav: Navigateur, page: Page): Promise<Pag
     const scripts = doc.querySelectorAll('script').map((x) => x.text).join('\n');
     const cibleJs = scripts.match(/(?:window\.|document\.)?location(?:\.href)?\s*=\s*['"]([^'"]+)['"]|location\.replace\(\s*['"]([^'"]+)['"]\s*\)/);
     const cible = cibleJs?.[1] ?? cibleJs?.[2];
-    if (cible && !/^javascript:/i.test(cible)) {
+    // Seulement sur une page qui ne sert qu'à rediriger (presque vide) : sur une vraie page, un script peut contenir
+    // l'adresse d'un bouton (« Se déconnecter »…) qu'un navigateur n'ouvre jamais tout seul.
+    const pageDeRedirection = doc.querySelectorAll('a').length <= 2 && doc.text.replace(/\s+/g, ' ').trim().length < 400;
+    if (cible && pageDeRedirection && !/^javascript:/i.test(cible) && !estDeconnexion(new URL(cible, page.url).toString())) {
       page = await nav.requete(new URL(cible, page.url).toString());
       continue;
     }
@@ -447,46 +470,150 @@ async function etapesConnexion(nav: Navigateur, email: string, motDePasse: strin
   }
   const reponse = formulaire(doc4, 'form[name="hiddenform"]', ['RelayState', 'SAMLResponse'], 'retour SAML', p4.url);
 
-  // 4. Retour SAML vers le CESI, puis les pages qu'un navigateur traverserait tout seul (ticket → ENT)
+  // 4. Retour SAML, puis les pages qu'un navigateur traverserait tout seul (jusqu'à l'pageEnt de l'ENT)
   let p5: Page = await nav.requete(reponse.action, {
     methode: 'POST',
     formulaire: { RelayState: reponse.valeurs.RelayState, [champ]: reponse.valeurs.SAMLResponse },
   });
   p5 = await suivrePagesAutomatiques(nav, p5);
-  const retourAccepte = /connexion r[ée]ussie|authentifi[ée]/i.test(parse(p5.texte).text);
-  let infos = trouverSession(p5, adresses);
   const diagnostics = [`Après le retour SAML (${champ}) :\n${diagnosticPage(p5)}`];
-  if (!infos) {
+  let pageEnt: Page | undefined = estPageEnt(p5, adresses) ? p5 : undefined;
+  if (!pageEnt) {
     // Authentifié auprès du CESI mais pas encore sur l'ENT (« Connexion réussie » sans retour) :
     // on repasse par la porte de l'ENT ; le CESI nous reconnaît et renvoie vers l'ENT sans redemander le mot de passe.
     let retour = await suivrePagesAutomatiques(nav, await nav.requete(`${adresses.ent}/`));
-    infos = trouverSession(retour, adresses);
-    if (!infos) {
-      const viaWayf = await envoyerWayfEnt(nav, retour, email);
-      if (viaWayf) {
-        retour = viaWayf;
-        infos = trouverSession(retour, adresses);
-      }
+    if (!estPageEnt(retour, adresses)) retour = (await envoyerWayfEnt(nav, retour, email)) ?? retour;
+    if (estPageEnt(retour, adresses)) pageEnt = retour;
+    else {
+      if (parse(retour.texte).querySelector('input[type="password"]')) diagnostics.push('(Le CESI redemande le mot de passe : la session n’a pas été conservée.)');
+      diagnostics.push(`Retour vers l'ENT :\n${diagnosticPage(retour)}`);
     }
-    if (!infos && formulaireConnexion(retour) && parse(retour.texte).querySelector('input[type="password"]')) {
-      diagnostics.push('(Le CESI redemande le mot de passe : la session n’a pas été conservée.)');
-    }
-    if (!infos) diagnostics.push(`Retour vers l'ENT :\n${diagnosticPage(retour)}`);
   }
-  if (!infos) {
+  if (!pageEnt) {
     const e = new ErreurEnt("Connexion réussie mais page de l'ENT inattendue (session introuvable).", 'ENT', false, diagnostics.join('\n\n'));
-    (e as ErreurEnt & { retourAccepte?: boolean }).retourAccepte = retourAccepte;
+    (e as ErreurEnt & { retourAccepte?: boolean }).retourAccepte = /connexion r[ée]ussie|authentifi[ée]/i.test(parse(p5.texte).text);
     throw e;
   }
 
-  // 5. Page « emploi du temps » : code personne
-  const p6 = await suivrePagesAutomatiques(nav, await nav.requete(infos.urlEdt));
-  const code = parse(p6.texte).querySelector('[data-code-personne]')?.getAttribute('data-code-personne');
-  const codePersonne = Number(code);
-  if (!code || !Number.isInteger(codePersonne)) {
-    throw new ErreurEnt("Code personne introuvable sur la page d'emploi du temps.", 'emploi du temps', false, diagnosticPage(p6));
+  // 5. Connecté à l'ENT : trouver le code personne (pageEnt, page « emploi du temps »…)
+  const infos = trouverSession(pageEnt, adresses);
+  const visitees: Page[] = [pageEnt];
+  let codePersonne = codePersonneDans(pageEnt);
+  const liens = [
+    ...(infos ? [infos.urlEdt] : []),
+    ...liensEmploiDuTemps(pageEnt, adresses),
+  ].filter((l, i, t) => t.indexOf(l) === i && !estDeconnexion(l));
+  for (const lien of liens.slice(0, 3)) {
+    if (codePersonne !== null) break;
+    try {
+      const p = await suivrePagesAutomatiques(nav, await nav.requete(lien));
+      visitees.push(p);
+      codePersonne = codePersonneDans(p);
+    } catch (e) {
+      if (e instanceof ErreurEnt && e.etape === 'sécurité') throw e;
+    }
   }
-  return { navigateur: nav, session: infos.session, codePersonne, prenom: infos.prenom, nom: infos.nom };
+  if (codePersonne === null) {
+    // Dernier essai : l'API des séances sans code personne (peut-être renvoie-t-elle celles de la personne connectée)
+    const essai = await essaiApiSansCode(nav, adresses);
+    if (!essai) {
+      throw new ErreurEnt(
+        "Connecté à l'ENT, mais code personne introuvable (le nouvel ENT a changé de présentation).",
+        'emploi du temps',
+        false,
+        visitees.map((p, i) => `Page ${i + 1} :\n${diagnosticPage(p)}\n${indicesEmploiDuTemps(p)}`).join('\n\n'),
+      );
+    }
+  }
+  return { navigateur: nav, session: infos?.session ?? '', codePersonne, prenom: infos?.prenom ?? '', nom: infos?.nom ?? '' };
+}
+
+/** Page de l'ENT où l'on est connecté (ni la page d'identification, ni le serveur de connexion). */
+function estPageEnt(page: Page, adresses: AdressesEnt): boolean {
+  const u = new URL(page.url);
+  if (u.host !== new URL(adresses.ent).host) return false;
+  if (/^\/(identification|login|logout|cas|saml|adfs)\b/.test(u.pathname)) return false;
+  const doc = parse(page.texte);
+  if (formulaireWayfEnt(page) || doc.querySelector('input[type="password"]')) return false;
+  // Une vraie page de l'ENT, connecté : on y trouve la session, ou au moins une navigation (une page d'erreur n'en a pas)
+  return !!trouverSession(page, adresses) || doc.querySelectorAll('a[href]').length >= 3;
+}
+
+/** Code personne dans la page : attribut data-code-personne, ou « codePersonne » dans un script / une adresse. */
+export function codePersonneDans(page: Page): number | null {
+  const doc = parse(page.texte);
+  const attribut = doc.querySelector('[data-code-personne]')?.getAttribute('data-code-personne');
+  const candidats = [
+    attribut,
+    page.texte.match(/codePersonne["'\s]*[:=]\s*["']?(\d{2,})/i)?.[1],
+    page.texte.match(/code[_-]?personne=(\d{2,})/i)?.[1],
+    page.texte.match(/["']codePersonne["']\s*,\s*["']?(\d{2,})/i)?.[1],
+  ];
+  for (const c of candidats) {
+    const n = Number(c);
+    if (c && Number.isInteger(n) && n > 0) return n;
+  }
+  return null;
+}
+
+/** Liens de la page qui mènent probablement à l'emploi du temps. */
+function liensEmploiDuTemps(page: Page, adresses: AdressesEnt): string[] {
+  const doc = parse(page.texte);
+  const ent = new URL(adresses.ent).host;
+  return doc
+    .querySelectorAll('a[href]')
+    .filter((a) => /emploi.du.temps|agenda|planning|calendrier|edt\b|seance/i.test(`${a.getAttribute('href')} ${a.text}`))
+    .map((a) => {
+      try {
+        return new URL(a.getAttribute('href')!, page.url);
+      } catch {
+        return undefined;
+      }
+    })
+    .filter((u): u is URL => !!u && u.host === ent)
+    .map((u) => u.toString());
+}
+
+/** Pour le diagnostic : ce qui, sur la page, pourrait mener à l'emploi du temps (sans valeur personnelle). */
+function indicesEmploiDuTemps(page: Page): string {
+  const doc = parse(page.texte);
+  const liens = doc
+    .querySelectorAll('a[href]')
+    .filter((a) => /emploi|agenda|planning|calendrier|edt|seance|cours/i.test(`${a.getAttribute('href')} ${a.text}`))
+    .map((a) => {
+      try {
+        return `${new URL(a.getAttribute('href')!, page.url).pathname.replace(/\d{3,}/g, '#')} (« ${a.text.trim().slice(0, 30)} »)`;
+      } catch {
+        return '';
+      }
+    })
+    .filter(Boolean)
+    .slice(0, 12);
+  const attributs = [...new Set((page.texte.match(/data-[a-z-]+(?==)/gi) ?? []).map((x) => x.toLowerCase()))].slice(0, 25);
+  const apis = [...new Set((page.texte.match(/\/api\/[a-z0-9/_-]+/gi) ?? []).map((x) => x.replace(/\d{3,}/g, '#')))].slice(0, 15);
+  const mots = ['codePersonne', 'personne', 'seance', 'emploi', 'idPersonne', 'matricule'].filter((m) => new RegExp(m, 'i').test(page.texte));
+  return [
+    `Liens « emploi du temps » possibles : ${liens.join(' · ') || 'aucun'}`,
+    `Attributs data-* : ${attributs.join(', ') || 'aucun'}`,
+    `Adresses /api/ citées : ${apis.join(' · ') || 'aucune'}`,
+    `Mots présents : ${mots.join(', ') || 'aucun'}`,
+  ].join('\n');
+}
+
+/** L'API des séances sans code personne : renvoie-t-elle du JSON ? */
+async function essaiApiSansCode(nav: Navigateur, adresses: AdressesEnt): Promise<boolean> {
+  const u = new URL('/api/seance/all', adresses.ent);
+  const debut = new Date();
+  const fin = new Date(debut.getTime() + 7 * 86_400_000);
+  u.search = new URLSearchParams({ start: debut.toISOString().slice(0, 10), end: fin.toISOString().slice(0, 10) }).toString();
+  try {
+    const r = await nav.requete(u.toString());
+    if (r.statut === 204) return true;
+    return r.statut === 200 && Array.isArray(JSON.parse(r.texte));
+  } catch (e) {
+    if (e instanceof ErreurEnt && e.etape === 'sécurité') throw e;
+    return false;
+  }
 }
 
 export async function connexionEnt(email: string, motDePasse: string, adresses: AdressesEnt = ADRESSES_CESI): Promise<SessionEnt> {
@@ -509,7 +636,7 @@ export async function connexionEnt(email: string, motDePasse: string, adresses: 
 /** Séances entre deux dates (AAAA-MM-JJ). */
 export async function seancesEnt(s: SessionEnt, du: string, au: string, adresses: AdressesEnt = ADRESSES_CESI): Promise<Cours[]> {
   const url = new URL('/api/seance/all', adresses.ent);
-  url.search = new URLSearchParams({ start: du, end: au, codePersonne: String(s.codePersonne) }).toString();
+  url.search = new URLSearchParams({ start: du, end: au, ...(s.codePersonne !== null ? { codePersonne: String(s.codePersonne) } : {}) }).toString();
   const r = await s.navigateur.requete(url.toString());
   if (r.statut === 204 || !r.texte.trim()) return [];
   if (r.statut !== 200) throw new ErreurEnt(`L'ENT a répondu ${r.statut}.`, 'séances');
