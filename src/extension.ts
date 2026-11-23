@@ -18,6 +18,8 @@ import { etudeDeCas, mesExercices, nouvelExercice, verifierCommande } from './co
 import { initialiserDiagnostics } from './verificationCode';
 import { EcranFerme } from './vues/ecranFerme';
 import { EcranStats } from './vues/ecranStats';
+import { EmploiDuTemps } from './edt';
+import { VueEmploiDuTemps } from './vues/vueEmploiDuTemps';
 import { lancerCctl, mesExamens, nouvelExamen, preparerExamen, type OutilsExamens } from './examens';
 import { lireExamens } from './core/examens';
 import type { Perimetre } from './core/seance';
@@ -113,6 +115,28 @@ export function activate(context: vscode.ExtensionContext): void {
   commande('forge.mesExercices', mesExercices);
   commande('forge.etudeDeCas', () => etudeDeCas(context, apresActivite));
   commande('forge.examens', () => mesExamens(context, outilsExamens));
+  // Emploi du temps (phase annexe A) : petite fenêtre dans la barre latérale.
+  // Protégé : un souci ici ne doit pas empêcher le reste de Forge de fonctionner.
+  let edt: EmploiDuTemps | undefined;
+  try {
+    edt = new EmploiDuTemps(context, journal);
+    context.subscriptions.push(
+      edt,
+      vscode.window.registerWebviewViewProvider(
+        VueEmploiDuTemps.id,
+        new VueEmploiDuTemps(edt, {
+          reviserProsits: (prosits, titre) => lancerRevision(context, journal, { type: 'prosits', noms: prosits, titre }, apresActivite),
+        }),
+      ),
+    );
+  } catch (e) {
+    journal.appendLine(`[emploi du temps] initialisation impossible : ${e instanceof Error ? e.stack : e}`);
+  }
+  const sansEdt = () => vscode.window.showErrorMessage("L'emploi du temps n'a pas pu démarrer : voir le journal Forge.");
+  commande('forge.edt.ouvrir', () => vscode.commands.executeCommand(`${VueEmploiDuTemps.id}.focus`));
+  commande('forge.edt.configurer', () => (edt ? edt.configurer() : sansEdt()));
+  commande('forge.edt.actualiser', () => (edt ? edt.actualiser(true) : sansEdt()));
+  commande('forge.edt.deconnecter', () => (edt ? edt.deconnecter() : sansEdt()));
   commande('forge.priseEnMain', () => vscode.commands.executeCommand('workbench.action.openWalkthrough', 'bouboule0.forge#forge.priseEnMain', false));
   commande('forge.cctlBlanc', async () => {
     const coffre = await obtenirCoffre();

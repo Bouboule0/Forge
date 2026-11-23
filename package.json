@@ -2,7 +2,7 @@
   "name": "forge",
   "displayName": "Forge — Révision par l'action",
   "description": "Transforme tes Prosits et CER (CESI) en second cerveau Obsidian et t'aide à réviser en codant.",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "publisher": "bouboule0",
   "license": "MIT",
   "repository": {
@@ -126,6 +126,29 @@
         "command": "forge.priseEnMain",
         "title": "Prise en main",
         "category": "Forge"
+      },
+      {
+        "command": "forge.edt.ouvrir",
+        "title": "Emploi du temps",
+        "category": "Forge",
+        "icon": "$(calendar)"
+      },
+      {
+        "command": "forge.edt.configurer",
+        "title": "Configurer l'emploi du temps (ENT CESI ou iCal)",
+        "category": "Forge",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "forge.edt.actualiser",
+        "title": "Actualiser l'emploi du temps",
+        "category": "Forge",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "forge.edt.deconnecter",
+        "title": "Déconnecter l'emploi du temps (effacer identifiants et cache)",
+        "category": "Forge"
       }
     ],
     "menus": {
@@ -163,6 +186,18 @@
           "command": "forge.verifierExercice",
           "when": "resourceFilename == exercice.cpp",
           "group": "navigation"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "forge.edt.actualiser",
+          "when": "view == forge.emploiDuTemps",
+          "group": "navigation@1"
+        },
+        {
+          "command": "forge.edt.configurer",
+          "when": "view == forge.emploiDuTemps",
+          "group": "navigation@2"
         }
       ]
     },
@@ -226,6 +261,18 @@
           "type": "string",
           "default": "https://api.deepseek.com",
           "description": "Adresse de l'API DeepSeek (compatible OpenAI)."
+        },
+        "forge.edt.barreEtat": {
+          "type": "boolean",
+          "default": true,
+          "description": "Afficher le cours en cours ou le prochain cours dans la barre d'état."
+        },
+        "forge.edt.actualisationHeures": {
+          "type": "number",
+          "default": 3,
+          "minimum": 1,
+          "maximum": 48,
+          "description": "Actualiser l'emploi du temps automatiquement toutes les N heures (l'ENT n'est jamais sollicité plus d'une fois toutes les 10 minutes)."
         }
       }
     },
@@ -327,7 +374,26 @@
           }
         ]
       }
-    ]
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "forge",
+          "title": "Forge",
+          "icon": "media/forge-barre.svg"
+        }
+      ]
+    },
+    "views": {
+      "forge": [
+        {
+          "type": "webview",
+          "id": "forge.emploiDuTemps",
+          "name": "Emploi du temps",
+          "icon": "media/forge-barre.svg"
+        }
+      ]
+    }
   },
   "scripts": {
     "build": "node esbuild.mjs",

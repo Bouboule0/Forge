@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Une pousse au-dessus d'un sillon : l'icône de Forge dans la barre d'activité -->
+  <path d="M12 21V11"/>
+  <path d="M12 13c0-3.5-2.5-6-6.5-6 0 3.5 2.5 6 6.5 6z"/>
+  <path d="M12 11c0-3.5 2.5-6 6.5-6 0 3.5-2.5 6-6.5 6z"/>
+  <path d="M4 21h16"/>
+</svg>

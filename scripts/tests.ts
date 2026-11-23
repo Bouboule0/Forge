@@ -467,7 +467,8 @@ test('les scripts des webviews sont du JavaScript valide', async () => {
   const { html: htmlFerme } = await import('../src/vues/ecranFerme');
   const { html: htmlCctl } = await import('../src/vues/ecranCctl');
   const { html: htmlStats } = await import('../src/vues/ecranStats');
-  for (const page of [htmlSeance({ cspSource: 'x' }), htmlImport({ cspSource: 'x' }, { prosits: [], notions: [] }), htmlPapier({ cspSource: 'x' }), htmlFerme({ cspSource: 'x' }), htmlCctl({ cspSource: 'x' }), htmlStats({ cspSource: 'x' })]) {
+  const { html: htmlEdt } = await import('../src/vues/vueEmploiDuTemps');
+  for (const page of [htmlSeance({ cspSource: 'x' }), htmlImport({ cspSource: 'x' }, { prosits: [], notions: [] }), htmlPapier({ cspSource: 'x' }), htmlFerme({ cspSource: 'x' }), htmlCctl({ cspSource: 'x' }), htmlStats({ cspSource: 'x' }), htmlEdt({ cspSource: 'x' })]) {
     const script = page.match(/<script nonce="[^"]+">([\s\S]*?)<\/script>/)?.[1];
     assert.ok(script, 'script trouvé');
     assert.doesNotThrow(() => new Function(script!), 'erreur de syntaxe dans le script de la webview');
@@ -795,3 +796,162 @@ test('statistiques : activité, prévision, paliers, réussite par type, AAV, CE
   assert.deepEqual([s.examens[0].jours, s.examens[0].programme], [10, 5]);
   assert.equal(s.maitrisees, 1);
 });
+
+// --------------------------------------------------------------------------
+// Annexe A : emploi du temps (ENT CESI simulé, iCal)
+
+import { coursActuelOuProchain, coursDepuisEnt, coursDepuisIcs, coursDuJour, lireDateEnt } from '../src/core/emploiDuTemps';
+import { connexionEnt, ErreurEnt, identifiantEnt, seancesEnt, type AdressesEnt } from '../src/core/entCesi';
+import { prositsDuCours } from '../src/vues/vueEmploiDuTemps';
+import { lundiDe } from '../src/edt';
+
+const SEANCES = [
+  { code: 'S2', title: 'Workshop C++', start: '2026-11-23T13:30:00+01', end: '2026-11-23T17:00:00+01', nomModule: 'Programmation orientée objet', salles: [{ nomSalle: 'B203' }], intervenants: [{ prenom: 'Ada', nom: 'Lovelace' }], allDay: false },
+  { code: 'S1', title: 'Prosit retour 4', start: '2026-11-23T09:00:00+01', end: '2026-11-23T12:00:00+01', nomModule: 'Programmation orientée objet', salles: [], intervenants: [], allDay: false },
+  { code: 'X', title: 'Cassé', start: 'pas une date', end: 'non' },
+];
+
+test('emploi du temps : séances de l’ENT (dates « +01 »), tri, jour, cours en cours', () => {
+  assert.equal(lireDateEnt('2026-11-23T09:00:00+01'), '2026-11-23T09:00:00+01:00');
+  const cours = coursDepuisEnt(SEANCES);
+  assert.deepEqual(cours.map((c) => c.id), ['S1', 'S2']);
+  assert.deepEqual([cours[1].salles, cours[1].intervenants, cours[1].module], [['B203'], ['Ada Lovelace'], 'Programmation orientée objet']);
+  assert.equal(coursDuJour(cours, '2026-11-23').length, 2);
+  const pendant = coursActuelOuProchain(cours, new Date('2026-11-23T10:00:00+01:00'));
+  assert.deepEqual([pendant?.cours.id, pendant?.enCours], ['S1', true]);
+  const entre = coursActuelOuProchain(cours, new Date('2026-11-23T12:30:00+01:00'));
+  assert.deepEqual([entre?.cours.id, entre?.enCours], ['S2', false]);
+  assert.equal(coursActuelOuProchain(cours, new Date('2026-11-25T10:00:00+01:00')), undefined);
+  assert.equal(lundiDe('2026-11-26'), '2026-11-23');
+  assert.equal(lundiDe('2026-11-23'), '2026-11-23');
+  assert.equal(lundiDe('2026-11-29'), '2026-11-23');
+});
+
+test('emploi du temps : calendrier iCal (lignes repliées, UTC, heure locale, journée)', () => {
+  const ics = [
+    'BEGIN:VCALENDAR',
+    'BEGIN:VEVENT',
+    'UID:a1',
+    'DTSTART:20261124T080000Z',
+    'DTEND:20261124T100000Z',
+    'SUMMARY:Programmation orien',
+    ' tée objet',
+    'LOCATION:Salle B203\\, bâtiment B',
+    'DESCRIPTION:Intervenant : Ada Lovelace',
+    'END:VEVENT',
+    'BEGIN:VEVENT',
+    'DTSTART;TZID=Europe/Paris:20261124T140000',
+    'DTEND;TZID=Europe/Paris:20261124T160000',
+    'SUMMARY:Anglais',
+    'END:VEVENT',
+    'BEGIN:VEVENT',
+    'DTSTART;VALUE=DATE:20261125',
+    'SUMMARY:Journée entreprise',
+    'END:VEVENT',
+    'END:VCALENDAR',
+  ].join('\r\n');
+  const cours = coursDepuisIcs(ics);
+  assert.deepEqual(cours.map((c) => c.titre), ['Programmation orientée objet', 'Anglais', 'Journée entreprise']);
+  assert.equal(cours[0].debut, '2026-11-24T08:00:00.000Z');
+  assert.deepEqual(cours[0].salles, ['Salle B203', 'bâtiment B']);
+  assert.deepEqual(cours[0].intervenants, ['Ada Lovelace']);
+  assert.equal(new Date(cours[1].debut).getHours(), 14, 'heure locale');
+  assert.equal(cours[2].journee, true);
+});
+
+test('emploi du temps : le cours propose de réviser les Prosits de son module', () => {
+  const prosits = [{ nom: 'P04 - Moteur', module: 'Programmation orientée objet' }, { nom: 'P10 - Réseau', module: 'Réseaux' }];
+  assert.deepEqual(prositsDuCours({ titre: 'Workshop', module: 'Programmation orientée objet' }, prosits), ['P04 - Moteur']);
+  assert.deepEqual(prositsDuCours({ titre: 'Anglais', module: '' }, prosits), []);
+  assert.equal(identifiantEnt('Mateo', 'Durand-Élise'), 'durand-elise-mateo');
+});
+
+/** Faux ENT CESI : reproduit les étapes du vrai parcours de connexion (SAML, formulaires, cookies). */
+async function fauxEnt(options: { motDePasse?: string; actionPiegee?: string; mfa?: boolean } = {}) {
+  const sessions = new Set<string>();
+  const serveur = http.createServer((req, res) => {
+    let brut = '';
+    req.on('data', (c) => (brut += c));
+    req.on('end', () => {
+      const u = new URL(req.url ?? '/', 'http://x');
+      const corps = Object.fromEntries(new URLSearchParams(brut));
+      const cookie = req.headers.cookie ?? '';
+      const page = (html: string, entetes: Record<string, string | string[]> = {}) => { res.writeHead(200, { 'Content-Type': 'text/html', ...entetes }); res.end(html); };
+      if (u.pathname === '/' ) return page('<div id="login"></div>', { 'Set-Cookie': 'ent_init=1; Path=/' });
+      if (u.pathname === '/login' && req.method === 'POST') {
+        assert.equal(u.searchParams.get('UserName'), 'mateo.durand@viacesi.fr');
+        return page('<form method="post" action="/adfs/ls"><input name="RelayState" value="relais"><input name="SAMLRequest" value="demande"></form>');
+      }
+      if (u.pathname === '/adfs/ls' && !u.search) {
+        assert.deepEqual(corps, { RelayState: 'relais', SAMLRequest: 'demande' });
+        return page(`<form id="options" method="post" action="${options.actionPiegee ?? '/adfs/ls?client-request-id=42&amp;x=1'}"></form>`, { 'Set-Cookie': 'MSISAuth=a; Path=/adfs' });
+      }
+      if (u.pathname === '/adfs/ls' && u.searchParams.get('client-request-id') === '42') {
+        assert.equal(u.searchParams.get('x'), '1');
+        assert.match(cookie, /MSISAuth=a/);
+        if (corps.Password !== (options.motDePasse ?? 'bon-mot-de-passe')) return page('<span id="errorText">Identifiant ou mot de passe incorrect.</span>');
+        if (options.mfa) return page('<p>Entrez le code de vérification envoyé sur votre téléphone</p>');
+        return page('<form name="hiddenform" method="post" action="/saml/acs"><input name="RelayState" value="relais"><input name="SAMLResponse" value="assertion"></form>');
+      }
+      if (u.pathname === '/saml/acs') {
+        assert.equal(corps.SAMLResponse, 'assertion');
+        sessions.add('jeton');
+        res.writeHead(302, { Location: '/accueil', 'Set-Cookie': 'ENT_SESSION=jeton; Path=/; HttpOnly' });
+        return res.end();
+      }
+      const connecte = /ENT_SESSION=jeton/.test(cookie);
+      if (u.pathname === '/accueil' && connecte) {
+        return page('<a class="sidebar-lien" href="/s123456/accueil">Accueil</a><div id="compte"><div class="plier-deplier__bouton"><span class="session_libelle">Mateo Durand</span></div></div>');
+      }
+      if (u.pathname === '/s123456/emploi-du-temps/durand-mateo' && connecte) return page('<div class="x" data-code-personne="4242"></div>');
+      if (u.pathname === '/api/seance/all' && connecte) {
+        assert.equal(u.searchParams.get('codePersonne'), '4242');
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify(SEANCES));
+      }
+      res.writeHead(403); res.end('interdit');
+    });
+  });
+  await new Promise<void>((ok) => serveur.listen(0, '127.0.0.1', ok));
+  const base = `http://127.0.0.1:${(serveur.address() as { port: number }).port}`;
+  const adresses: AdressesEnt = { ent: base, wayf: base, domainesAutorises: ['127.0.0.1'], autoriserHttp: true };
+  return { adresses, fermer: () => serveur.close() };
+}
+
+test('ENT CESI : connexion complète (SAML, cookies, redirection) puis séances', async () => {
+  const ent = await fauxEnt();
+  try {
+    const s = await connexionEnt('mateo.durand@viacesi.fr', 'bon-mot-de-passe', ent.adresses);
+    assert.deepEqual([s.session, s.codePersonne, s.prenom, s.nom], ['s123456', 4242, 'Mateo', 'Durand']);
+    const cours = await seancesEnt(s, '2026-11-23', '2026-12-13', ent.adresses);
+    assert.equal(cours.length, 2);
+    assert.ok(!s.navigateur.journal.some((l) => /bon-mot-de-passe/.test(l)), 'le mot de passe n’apparaît jamais dans le journal');
+  } finally {
+    ent.fermer();
+  }
+});
+
+test('ENT CESI : mauvais mot de passe, double authentification, page piégée', async () => {
+  const mauvais = await fauxEnt({ motDePasse: 'autre' });
+  try {
+    await assert.rejects(connexionEnt('mateo.durand@viacesi.fr', 'bon-mot-de-passe', mauvais.adresses), (e: unknown) => e instanceof ErreurEnt && e.identifiantsRefuses && /incorrect/.test(e.message));
+  } finally {
+    mauvais.fermer();
+  }
+  const mfa = await fauxEnt({ mfa: true });
+  try {
+    await assert.rejects(connexionEnt('mateo.durand@viacesi.fr', 'bon-mot-de-passe', mfa.adresses), /double authentification/);
+  } finally {
+    mfa.fermer();
+  }
+  // Le formulaire de connexion pointe vers un autre serveur : le mot de passe ne part pas
+  const piege = await fauxEnt({ actionPiegee: 'https://voleur.example.com/login' });
+  try {
+    await assert.rejects(connexionEnt('mateo.durand@viacesi.fr', 'bon-mot-de-passe', piege.adresses), /voleur\.example\.com n'est pas un serveur du CESI/);
+  } finally {
+    piege.fermer();
+  }
+  await assert.rejects(connexionEnt('', '', ADRESSES_TEST), /manquant/);
+});
+
+const ADRESSES_TEST: AdressesEnt = { ent: 'https://ent.cesi.fr', wayf: 'https://wayf.cesi.fr', domainesAutorises: ['cesi.fr'] };

@@ -20,7 +20,12 @@ Le plan complet est dans [`docs/PLAN.md`](docs/PLAN.md).
 | 5. Ferme | Ferme pixel-art que tu aménages toi-même | ✅ |
 | 6. Finitions | Mode examen (CCTL, étude de cas), statistiques, prise en main, `.vsix` | ✅ |
 
-Ces six phases sont les **phases principales** du projet : elles sont terminées (version 1.0.0). D'autres idées viendront ensuite sous forme de **phases annexes** (par exemple : exercices UML avec Mermaid).
+Ces six phases sont les **phases principales** du projet : elles sont terminées (version 1.0.0). Viennent ensuite les **phases annexes** :
+
+| Annexe | Contenu | État |
+|---|---|---|
+| A. Emploi du temps | Cours du jour dans la barre latérale (ENT CESI ou iCal), prochain cours dans la barre d'état | ✅ |
+| B. UML | Exercices de diagrammes de classes avec Mermaid | 💡 idée |
 
 ---
 
@@ -245,6 +250,20 @@ Ouvre-la avec 🌻 dans la barre d'état, **Forge : Ma ferme**, ou le bouton en 
 
 `Ctrl+Shift+P` → **Forge : Statistiques** : notions maîtrisées, série, exercices de la semaine, réussite sur 30 jours, activité jour par jour, révisions prévues, maîtrise par Prosit, réussite par type d'exercice, objectifs (AAV) prouvés, avancement des tableaux de validation de tes CER, notions fragiles (avec « Réviser »), examens à venir. Survole les graphiques pour le détail ; chaque graphique a aussi sa version en tableau.
 
+## 📅 Emploi du temps (annexe A)
+
+Clique sur l'icône **Forge** (une pousse 🌱) dans la barre d'activité, à gauche : la vue **Emploi du temps** affiche les cours du jour, avec des boutons pour changer de jour ou de semaine. Le cours en cours est surligné avec sa progression. La barre d'état affiche le prochain cours (`🕑 14:00 Anglais · C105`). Si le cours correspond à un module de tes Prosits, **🌱 Réviser ce module** lance une séance dessus.
+
+Pour le configurer : **Forge : Configurer l'emploi du temps**, puis choisis la source.
+
+- **🏫 ENT CESI** : ton adresse `@viacesi.fr` et ton mot de passe. Forge se connecte comme un navigateur (même parcours que la bibliothèque [go-cesi](https://github.com/mateo08c/go-cesi)) et lit tes séances.
+  - ⚠️ **Non officiel** : si le CESI change ses pages, ou demande une double authentification, la connexion ne marchera plus. Utilise alors un lien iCal.
+  - 🔒 Le mot de passe est stocké dans le **coffre-fort de VS Code** et envoyé **uniquement aux serveurs du CESI, en HTTPS**. Les certificats sont toujours vérifiés. Forge s'arrête si une page tente d'envoyer tes identifiants ailleurs.
+  - Pour ne pas surcharger l'ENT, l'emploi du temps est **mis en cache**, actualisé toutes les 3 heures (réglage `forge.edt.actualisationHeures`) et jamais plus d'une fois toutes les 10 minutes.
+- **🔗 Lien iCal (.ics)** : si ton ENT, Outlook ou Google Agenda te donne un lien d'abonnement à ton calendrier. C'est plus robuste, et ça ne demande pas de mot de passe.
+
+**Forge : Déconnecter l'emploi du temps** efface les identifiants et le cache.
+
 ## 🧭 Les commandes
 
 | Commande | Ce qu'elle fait |
@@ -255,6 +274,9 @@ Ouvre-la avec 🌻 dans la barre d'état, **Forge : Ma ferme**, ou le bouton en 
 | Forge : Mes examens | Ajouter un examen, réviser son programme, CCTL blanc, étude de cas blanche |
 | Forge : Examen blanc CCTL | Questionnaire chronométré noté sur 20 |
 | Forge : Prise en main | Le guide pas à pas dans VS Code |
+| Forge : Emploi du temps | Ouvre la vue de la barre latérale |
+| Forge : Configurer l'emploi du temps | ENT CESI ou lien iCal |
+| Forge : Actualiser l'emploi du temps | Recharge les cours |
 | Forge : Vérifier l'installation | Teste `wsl g++` (compile et lance « Hello Forge »), pandoc et git |
 | Forge : Créer / choisir le coffre Obsidian | Crée les dossiers et règle les couleurs du graphe |
 | Forge : Importer des CER / Prosits (.docx) | Lit tes Word et crée les notes, après l'écran de validation |
@@ -283,6 +305,8 @@ Ouvre-la avec 🌻 dans la barre d'état, **Forge : Ma ferme**, ou le bouton en 
 | `forge.definitionsIA` | `accepter` | `accepter` : définitions IA acceptées puis relues par DeepSeek · `verifier` : à valider toi-même |
 | `forge.relectureIAApresImport` | `true` | Relire automatiquement les nouvelles définitions après un import |
 | `forge.deepseek.modele` | `deepseek-chat` | Modèle DeepSeek |
+| `forge.edt.barreEtat` | `true` | Prochain cours dans la barre d'état |
+| `forge.edt.actualisationHeures` | `3` | Fréquence d'actualisation de l'emploi du temps |
 
 ---
 

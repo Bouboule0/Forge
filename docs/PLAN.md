@@ -264,7 +264,12 @@ Le tableau de bord indique, par Prosit, la part des AAV réellement atteints.
 
 ### Phases annexes
 
-Les phases 0 à 6 ci-dessus sont les **phases principales** : le socle de Forge. D'autres idées s'ajouteront ensuite sous forme de **phases annexes** (à définir ensemble).
+Les phases 0 à 6 ci-dessus sont les **phases principales** : le socle de Forge. D'autres idées s'ajoutent ensuite sous forme de **phases annexes** :
+
+| Annexe | Contenu | État |
+|---|---|---|
+| A. Emploi du temps | Vue latérale (ENT CESI via le parcours de go-cesi, ou iCal), prochain cours dans la barre d'état, « Réviser ce module » | ✅ |
+| B. UML | Exercices de diagrammes de classes (Mermaid) | 💡 |
 
 ## 13. Points de vigilance
 - **Pas de corrigé officiel** : l'IA peut se tromper. Garde-fous : statut `à vérifier`, tests réels pour le code, bouton « Signaler une erreur », et un mode qui demande à DeepSeek ses sources.
