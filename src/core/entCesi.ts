@@ -3,8 +3,10 @@
 // avec deux différences de sécurité : les certificats HTTPS sont TOUJOURS vérifiés, et les identifiants
 // ne sont envoyés qu'à un serveur autorisé (cesi.fr / viacesi.fr) en HTTPS.
 //
-// Parcours : ent.cesi.fr → wayf.cesi.fr (SAML) → page de connexion CESI (identifiants) → retour ENT (SAML)
+// Parcours actuel : ent.cesi.fr/identification/wayf (identifiant) → wayf.cesi.fr (CAS, avec l'adresse de retour)
+// → demande SAML → page de connexion CESI (mot de passe) → retour SAML → ticket CAS → ENT
 // → page « emploi du temps » (code personne) → /api/seance/all (JSON).
+// L'ancien parcours de go-cesi (directement wayf.cesi.fr/login) reste utilisé si l'ENT n'a pas de formulaire « wayf ».
 //
 // Ce n'est PAS une API officielle : si le CESI change ses pages, la connexion peut cesser de marcher.
 
@@ -285,28 +287,69 @@ function trouverSession(page: Page, adresses: AdressesEnt): { session: string; u
 
 type ChampRetour = 'SAMLResponse' | 'SAMLRequest';
 
+/** Formulaire « wayf » de l'accueil de l'ENT (champ « login ») : la porte d'entrée actuelle. */
+function formulaireWayfEnt(page: Page): { action: string; methode: 'GET' | 'POST'; valeurs: Record<string, string>; champ: string } | undefined {
+  const doc = parse(page.texte);
+  const f = doc.querySelector('form#wayf') ?? doc.querySelectorAll('form').find((x) => x.querySelector('input[name="login"]'));
+  if (!f) return undefined;
+  const champ = f.querySelector('input[name="login"]') ? 'login' : f.querySelector('input[type="text"], input[type="email"]')?.getAttribute('name');
+  if (!champ) return undefined;
+  const valeurs: Record<string, string> = {};
+  for (const c of f.querySelectorAll('input')) {
+    const nom = c.getAttribute('name');
+    if (nom && (c.getAttribute('type') ?? '').toLowerCase() === 'hidden') valeurs[nom] = c.getAttribute('value') ?? '';
+  }
+  const action = new URL((f.getAttribute('action') || page.url).replace(/&amp;/g, '&'), page.url).toString();
+  return { action, methode: (f.getAttribute('method') ?? 'post').toLowerCase() === 'get' ? 'GET' : 'POST', valeurs, champ };
+}
+
+async function envoyerWayfEnt(nav: Navigateur, page: Page, email: string): Promise<Page | undefined> {
+  const f = formulaireWayfEnt(page);
+  if (!f) return undefined;
+  const valeurs = { ...f.valeurs, [f.champ]: email };
+  if (f.methode === 'POST') return suivrePagesAutomatiques(nav, await nav.requete(f.action, { methode: 'POST', formulaire: valeurs }));
+  const u = new URL(f.action);
+  for (const [k, v] of Object.entries(valeurs)) u.searchParams.set(k, v);
+  return suivrePagesAutomatiques(nav, await nav.requete(u.toString()));
+}
+
+/** Formulaire où taper le mot de passe (page de connexion CESI). */
+function formulaireConnexion(page: Page): string | undefined {
+  const doc = parse(page.texte);
+  const f =
+    doc.querySelectorAll('form').find((x) => x.querySelector('input[type="password"]')) ??
+    doc.querySelector('#options') ??
+    doc.querySelector('form#loginForm');
+  const action = f?.getAttribute('action');
+  return action ? new URL(action.replace(/&amp;/g, '&'), page.url).toString() : undefined;
+}
+
 async function connexionVariante(email: string, motDePasse: string, adresses: AdressesEnt, champ: ChampRetour): Promise<SessionEnt> {
   const nav = new Navigateur(adresses);
 
-  // 1. Page d'accueil de l'ENT (cookies de départ)
-  await nav.requete(`${adresses.ent}/`);
+  // 1. Accueil de l'ENT
+  const accueil = await suivrePagesAutomatiques(nav, await nav.requete(`${adresses.ent}/`));
 
-  // 2. Le WAYF du CESI renvoie une demande SAML vers le serveur de connexion
-  const wayf = new URL('/login', adresses.wayf);
-  wayf.search = new URLSearchParams({ client_name: 'ClientIdpViaCesiFr', needs_client_redirection: 'true', UserName: email }).toString();
-  const p2 = await nav.requete(wayf.toString(), { methode: 'POST', formulaire: {} });
-  const demande = formulaire(parse(p2.texte), 'form', ['RelayState', 'SAMLRequest'], 'redirection SAML', p2.url);
-
-  // 3. Le serveur de connexion affiche le formulaire d'identification
-  const p3 = await nav.requete(demande.action, { methode: 'POST', formulaire: demande.valeurs });
-  const doc3 = parse(p3.texte);
-  const options = doc3.querySelector('#options') ?? doc3.querySelector('form#loginForm') ?? doc3.querySelector('form');
-  const action = options?.getAttribute('action');
-  if (!action) throw new ErreurEnt('Page de connexion inattendue (formulaire introuvable).', 'page de connexion', false, diagnosticPage(p3));
-  const actionConnexion = new URL(action.replace(/&amp;/g, '&'), p3.url).toString();
+  // 2. Aller jusqu'à la page de connexion CESI
+  let p3: Page;
+  const parEnt = await envoyerWayfEnt(nav, accueil, email);
+  if (parEnt) {
+    // Parcours actuel : le formulaire « wayf » de l'ENT donne au serveur d'authentification (CAS) l'adresse de retour vers l'ENT ;
+    // la demande SAML qui suit est envoyée automatiquement, comme dans un navigateur.
+    p3 = parEnt;
+  } else {
+    // Ancien parcours (go-cesi) : directement le WAYF du CESI
+    const wayf = new URL('/login', adresses.wayf);
+    wayf.search = new URLSearchParams({ client_name: 'ClientIdpViaCesiFr', needs_client_redirection: 'true', UserName: email }).toString();
+    const p2 = await nav.requete(wayf.toString(), { methode: 'POST', formulaire: {} });
+    const demande = formulaire(parse(p2.texte), 'form', ['RelayState', 'SAMLRequest'], 'redirection SAML', p2.url);
+    p3 = await nav.requete(demande.action, { methode: 'POST', formulaire: demande.valeurs });
+  }
+  const actionConnexion = formulaireConnexion(p3);
+  if (!actionConnexion) throw new ErreurEnt('Page de connexion inattendue (formulaire introuvable).', 'page de connexion', false, diagnosticPage(p3));
   nav.verifierAdresse(actionConnexion); // jamais de mot de passe vers un autre serveur
 
-  // 4. Envoi des identifiants
+  // 3. Envoi des identifiants
   const p4 = await nav.requete(actionConnexion, { methode: 'POST', formulaire: { UserName: email, Password: motDePasse, AuthMethod: 'FormsAuthentication' } });
   const doc4 = parse(p4.texte);
   const erreur = doc4.querySelectorAll('#errorText').map((e) => e.text.trim()).filter(Boolean).join(' — ');
@@ -324,23 +367,39 @@ async function connexionVariante(email: string, motDePasse: string, adresses: Ad
   }
   const reponse = formulaire(doc4, 'form[name="hiddenform"]', ['RelayState', 'SAMLResponse'], 'retour SAML', p4.url);
 
-  // 5. Retour à l'ENT avec l'assertion SAML, puis les pages qu'un navigateur traverserait tout seul
+  // 4. Retour SAML vers le CESI, puis les pages qu'un navigateur traverserait tout seul (ticket → ENT)
   let p5: Page = await nav.requete(reponse.action, {
     methode: 'POST',
     formulaire: { RelayState: reponse.valeurs.RelayState, [champ]: reponse.valeurs.SAMLResponse },
   });
   p5 = await suivrePagesAutomatiques(nav, p5);
+  const retourAccepte = /connexion r[ée]ussie|authentifi[ée]/i.test(parse(p5.texte).text);
   let infos = trouverSession(p5, adresses);
   const diagnostics = [`Après le retour SAML (${champ}) :\n${diagnosticPage(p5)}`];
   if (!infos) {
-    // Peut-être connecté mais arrivé ailleurs que sur l'accueil : on recharge l'accueil de l'ENT
-    const accueil = await suivrePagesAutomatiques(nav, await nav.requete(`${adresses.ent}/`));
-    infos = trouverSession(accueil, adresses);
-    if (!infos) diagnostics.push(`Accueil de l'ENT :\n${diagnosticPage(accueil)}`);
+    // Authentifié auprès du CESI mais pas encore sur l'ENT (« Connexion réussie » sans retour) :
+    // on repasse par la porte de l'ENT ; le CESI nous reconnaît et renvoie vers l'ENT sans redemander le mot de passe.
+    let retour = await suivrePagesAutomatiques(nav, await nav.requete(`${adresses.ent}/`));
+    infos = trouverSession(retour, adresses);
+    if (!infos) {
+      const viaWayf = await envoyerWayfEnt(nav, retour, email);
+      if (viaWayf) {
+        retour = viaWayf;
+        infos = trouverSession(retour, adresses);
+      }
+    }
+    if (!infos && formulaireConnexion(retour) && parse(retour.texte).querySelector('input[type="password"]')) {
+      diagnostics.push('(Le CESI redemande le mot de passe : la session n’a pas été conservée.)');
+    }
+    if (!infos) diagnostics.push(`Retour vers l'ENT :\n${diagnosticPage(retour)}`);
   }
-  if (!infos) throw new ErreurEnt("Connexion réussie mais page de l'ENT inattendue (session introuvable).", 'ENT', false, diagnostics.join('\n\n'));
+  if (!infos) {
+    const e = new ErreurEnt("Connexion réussie mais page de l'ENT inattendue (session introuvable).", 'ENT', false, diagnostics.join('\n\n'));
+    (e as ErreurEnt & { retourAccepte?: boolean }).retourAccepte = retourAccepte;
+    throw e;
+  }
 
-  // 6. Page « emploi du temps » : code personne
+  // 5. Page « emploi du temps » : code personne
   const p6 = await suivrePagesAutomatiques(nav, await nav.requete(infos.urlEdt));
   const code = parse(p6.texte).querySelector('[data-code-personne]')?.getAttribute('data-code-personne');
   const codePersonne = Number(code);
@@ -355,8 +414,9 @@ export async function connexionEnt(email: string, motDePasse: string, adresses: 
   try {
     return await connexionVariante(email, motDePasse, adresses, 'SAMLResponse');
   } catch (e) {
-    // go-cesi renvoie l'assertion sous le nom « SAMLRequest » : si le nom standard n'aboutit pas, on essaie le sien (une fois)
-    if (!(e instanceof ErreurEnt) || e.etape !== 'ENT') throw e;
+    // go-cesi renvoie l'assertion sous le nom « SAMLRequest ». On ne réessaie avec ce nom que si le CESI
+    // n'a PAS accepté le premier retour (sinon le problème est ailleurs, et une 2e connexion ne servirait à rien).
+    if (!(e instanceof ErreurEnt) || e.etape !== 'ENT' || (e as ErreurEnt & { retourAccepte?: boolean }).retourAccepte) throw e;
     try {
       return await connexionVariante(email, motDePasse, adresses, 'SAMLRequest');
     } catch (e2) {

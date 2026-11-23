@@ -1011,3 +1011,87 @@ test('ENT CESI : page inconnue → diagnostic utile, sans aucune valeur de champ
     ent.fermer();
   }
 });
+
+/** Faux ENT reproduisant le parcours CESI actuel (diagnostic de novembre 2026) : porte « wayf » de l'ENT, CAS, SAML, ticket. */
+async function fauxEntActuel(options: { perdService?: boolean } = {}) {
+  let base = '';
+  let soumissionsWayf = 0;
+  const serveur = http.createServer();
+  serveur.on('request', (req, res) => {
+    let brut = '';
+    req.on('data', (c) => (brut += c));
+    req.on('end', () => {
+      const u = new URL(req.url ?? '/', 'http://x');
+      const corps = Object.fromEntries(new URLSearchParams(brut));
+      const cookie = req.headers.cookie ?? '';
+      const page = (html: string, entetes: Record<string, string> = {}) => { res.writeHead(200, { 'Content-Type': 'text/html', ...entetes }); res.end(html); };
+      const rediriger = (vers: string, entetes: Record<string, string> = {}) => { res.writeHead(302, { Location: vers, ...entetes }); res.end(); };
+      const service = `${base}/connexion`;
+      if (u.pathname === '/cas/login' && req.method === 'POST' && corps.SAMLResponse === 'assertion') {
+        const relais = decodeURIComponent(corps.RelayState ?? '');
+        // Sans adresse de retour, le CAS affiche « Connexion réussie » (comme dans ton diagnostic)
+        if (!relais.startsWith('http')) return page('<title>Cesi - Authentification</title><h2>Connexion réussie</h2><p>Vous vous êtes authentifié(e) auprès du service central.</p><a href="/ent/">ENT</a>', { 'Set-Cookie': 'TGC=ok; Path=/cas' });
+        return rediriger(`${relais}?ticket=ST-42`, { 'Set-Cookie': 'TGC=ok; Path=/cas' });
+      }
+      if (u.pathname === '/connexion' && u.searchParams.get('ticket') === 'ST-42') return rediriger('/s99/accueil', { 'Set-Cookie': 'ENT_SESSION=ok; Path=/' });
+      const connecte = /ENT_SESSION=ok/.test(cookie);
+      if (u.pathname === '/s99/accueil' && connecte) return page('<nav><a href="/s99/emploi-du-temps/durand-mateo">Emploi du temps</a></nav>');
+      if (u.pathname === '/s99/emploi-du-temps/durand-mateo' && connecte) return page('<div data-code-personne="777"></div>');
+      if (u.pathname === '/' && connecte) return rediriger('/s99/accueil');
+      if (u.pathname === '/' ) return rediriger('/identification/wayf');
+      if (u.pathname === '/identification/wayf' && req.method === 'GET') {
+        return page('<title>Cesi - Authentification</title><form id="wayf" method="post" action="/identification/wayf/"><input type="text" name="login"><button>Valider</button></form>');
+      }
+      if (u.pathname === '/identification/wayf/' && req.method === 'POST') {
+        soumissionsWayf++;
+        assert.equal(corps.login, 'mateo.durand@viacesi.fr');
+        return rediriger(`/cas/login?service=${encodeURIComponent(service)}&UserName=${encodeURIComponent(corps.login)}`);
+      }
+      if (u.pathname === '/cas/login') {
+        if (/TGC=ok/.test(cookie)) return rediriger(`${u.searchParams.get('service')}?ticket=ST-42`);
+        const relais = options.perdService ? 'sans-service' : encodeURIComponent(u.searchParams.get('service') ?? '');
+        return page(`<body onload="document.forms[0].submit()"><form method="post" action="/adfs/ls/"><input type="hidden" name="SAMLRequest" value="demande"><input type="hidden" name="RelayState" value="${relais}"></form></body>`);
+      }
+      if (u.pathname === '/adfs/ls/' && !u.search) {
+        assert.equal(corps.SAMLRequest, 'demande');
+        return page(`<form id="loginForm" method="post" action="/adfs/ls/?client-request-id=7&amp;RelayState=${corps.RelayState}"><input id="userNameInput" name="UserName" type="email"><input id="passwordInput" name="Password" type="password"><input name="AuthMethod" type="hidden" value="FormsAuthentication"></form>`);
+      }
+      if (u.pathname === '/adfs/ls/' && u.searchParams.get('client-request-id') === '7') {
+        if (corps.Password !== 'bon-mot-de-passe') return page('<span id="errorText">Mot de passe incorrect.</span>');
+        return page(`<form name="hiddenform" method="post" action="/cas/login?client_name=ClientIdpViaCesiFr"><input type="hidden" name="SAMLResponse" value="assertion"><input type="hidden" name="RelayState" value="${u.searchParams.get('RelayState')}"></form>`);
+      }
+      if (u.pathname === '/api/seance/all' && connecte && u.searchParams.get('codePersonne') === '777') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify(SEANCES));
+      }
+      res.writeHead(404); res.end('introuvable');
+    });
+  });
+  await new Promise<void>((ok) => serveur.listen(0, '127.0.0.1', ok));
+  base = `http://127.0.0.1:${(serveur.address() as { port: number }).port}`;
+  const adresses: AdressesEnt = { ent: base, wayf: base, domainesAutorises: ['127.0.0.1'], autoriserHttp: true };
+  return { adresses, soumissionsWayf: () => soumissionsWayf, fermer: () => serveur.close() };
+}
+
+test('ENT CESI (parcours actuel) : porte « wayf » de l’ENT, CAS, SAML automatique, ticket', async () => {
+  const ent = await fauxEntActuel();
+  try {
+    const s = await connexionEnt('mateo.durand@viacesi.fr', 'bon-mot-de-passe', ent.adresses);
+    assert.deepEqual([s.session, s.codePersonne], ['s99', 777]);
+    assert.equal((await seancesEnt(s, '2026-11-23', '2026-12-13', ent.adresses)).length, 2);
+    assert.equal(ent.soumissionsWayf(), 1);
+  } finally {
+    ent.fermer();
+  }
+});
+
+test('ENT CESI (parcours actuel) : « Connexion réussie » sans retour → on repasse par l’ENT, sans 2e mot de passe', async () => {
+  const ent = await fauxEntActuel({ perdService: true });
+  try {
+    const s = await connexionEnt('mateo.durand@viacesi.fr', 'bon-mot-de-passe', ent.adresses);
+    assert.equal(s.codePersonne, 777);
+    assert.equal(ent.soumissionsWayf(), 2, 'la porte de l’ENT est soumise une 2e fois, le CAS reconnaît la session');
+  } finally {
+    ent.fermer();
+  }
+});
