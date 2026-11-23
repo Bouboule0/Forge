@@ -867,7 +867,7 @@ test('emploi du temps : le cours propose de réviser les Prosits de son module',
 });
 
 /** Faux ENT CESI : reproduit les étapes du vrai parcours de connexion (SAML, formulaires, cookies). */
-async function fauxEnt(options: { motDePasse?: string; actionPiegee?: string; mfa?: boolean } = {}) {
+async function fauxEnt(options: { motDePasse?: string; actionPiegee?: string; mfa?: boolean; intermediaire?: boolean; redirectionJs?: boolean; champGoCesi?: boolean; nouvelleInterface?: boolean; inconnu?: boolean } = {}) {
   const sessions = new Set<string>();
   const serveur = http.createServer((req, res) => {
     let brut = '';
@@ -894,15 +894,30 @@ async function fauxEnt(options: { motDePasse?: string; actionPiegee?: string; mf
         return page('<form name="hiddenform" method="post" action="/saml/acs"><input name="RelayState" value="relais"><input name="SAMLResponse" value="assertion"></form>');
       }
       if (u.pathname === '/saml/acs') {
-        assert.equal(corps.SAMLResponse, 'assertion');
-        sessions.add('jeton');
+        const recu = options.champGoCesi ? corps.SAMLRequest : corps.SAMLResponse;
+        if (recu !== 'assertion') return page('<html><title>Erreur</title><p>Erreur d’authentification</p></html>');
+        if (options.intermediaire) {
+          // Page qui se soumet toute seule en JavaScript (fréquent avec SAML / CAS)
+          return page('<body onload="document.forms[0].submit()"><form method="post" action="/cas/callback"><input type="hidden" name="ticket" value="ST-1"><noscript><button>Continuer</button></noscript></form></body>');
+        }
+        if (options.redirectionJs) {
+          res.writeHead(200, { 'Content-Type': 'text/html', 'Set-Cookie': 'ENT_SESSION=jeton; Path=/; HttpOnly' });
+          return res.end('<script>window.location.href = "/accueil";</script>');
+        }
+        res.writeHead(302, { Location: '/accueil', 'Set-Cookie': 'ENT_SESSION=jeton; Path=/; HttpOnly' });
+        return res.end();
+      }
+      if (u.pathname === '/cas/callback' && corps.ticket === 'ST-1') {
         res.writeHead(302, { Location: '/accueil', 'Set-Cookie': 'ENT_SESSION=jeton; Path=/; HttpOnly' });
         return res.end();
       }
       const connecte = /ENT_SESSION=jeton/.test(cookie);
       if (u.pathname === '/accueil' && connecte) {
+        if (options.inconnu) return page('<title>Nouvel ENT</title><form id="recherche" action="/recherche"><input name="q" value="secret-dans-un-champ"></form><a href="/tableau-de-bord">Tableau</a>');
+        if (options.nouvelleInterface) return page('<nav><a href="/s123456/emploi-du-temps/durand-mateo">Mon emploi du temps</a></nav>');
         return page('<a class="sidebar-lien" href="/s123456/accueil">Accueil</a><div id="compte"><div class="plier-deplier__bouton"><span class="session_libelle">Mateo Durand</span></div></div>');
       }
+      if (u.pathname === '/' && connecte && options.inconnu) return page('<title>Nouvel ENT</title>');
       if (u.pathname === '/s123456/emploi-du-temps/durand-mateo' && connecte) return page('<div class="x" data-code-personne="4242"></div>');
       if (u.pathname === '/api/seance/all' && connecte) {
         assert.equal(u.searchParams.get('codePersonne'), '4242');
@@ -955,3 +970,44 @@ test('ENT CESI : mauvais mot de passe, double authentification, page piégée', 
 });
 
 const ADRESSES_TEST: AdressesEnt = { ent: 'https://ent.cesi.fr', wayf: 'https://wayf.cesi.fr', domainesAutorises: ['cesi.fr'] };
+
+test('ENT CESI : page intermédiaire automatique, redirection JavaScript, nouvelle présentation', async () => {
+  for (const option of ['intermediaire', 'redirectionJs', 'nouvelleInterface'] as const) {
+    const ent = await fauxEnt({ [option]: true });
+    try {
+      const s = await connexionEnt('mateo.durand@viacesi.fr', 'bon-mot-de-passe', ent.adresses);
+      assert.deepEqual([s.session, s.codePersonne], ['s123456', 4242], option);
+    } finally {
+      ent.fermer();
+    }
+  }
+});
+
+test('ENT CESI : si le nom standard échoue, on réessaie avec celui de go-cesi', async () => {
+  const ent = await fauxEnt({ champGoCesi: true });
+  try {
+    const s = await connexionEnt('mateo.durand@viacesi.fr', 'bon-mot-de-passe', ent.adresses);
+    assert.equal(s.codePersonne, 4242);
+  } finally {
+    ent.fermer();
+  }
+});
+
+test('ENT CESI : page inconnue → diagnostic utile, sans aucune valeur de champ', async () => {
+  const ent = await fauxEnt({ inconnu: true });
+  try {
+    await assert.rejects(connexionEnt('mateo.durand@viacesi.fr', 'bon-mot-de-passe', ent.adresses), (e: unknown) => {
+      assert.ok(e instanceof ErreurEnt && e.etape === 'ENT');
+      const d = e.diagnostic ?? '';
+      assert.match(d, /Titre : Nouvel ENT/);
+      assert.match(d, /Formulaire 1 \(recherche\) → http:\/\/127\.0\.0\.1:\d+\/recherche · champs : q/);
+      assert.match(d, /Liens : \/tableau-de-bord/);
+      assert.match(d, /\.sidebar-lien=0/);
+      assert.match(d, /Deuxième essai/);
+      for (const secret of ['secret-dans-un-champ', 'bon-mot-de-passe', 'assertion', 'relais', 'demande']) assert.ok(!d.includes(secret), `« ${secret} » ne doit pas apparaître`);
+      return true;
+    });
+  } finally {
+    ent.fermer();
+  }
+});

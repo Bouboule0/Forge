@@ -27,7 +27,13 @@ export const ADRESSES_CESI: AdressesEnt = {
 };
 
 export class ErreurEnt extends Error {
-  constructor(message: string, readonly etape: string, readonly identifiantsRefuses = false) {
+  constructor(
+    message: string,
+    readonly etape: string,
+    readonly identifiantsRefuses = false,
+    /** Description de la page reçue, sans aucune valeur de champ ni mot de passe (à copier pour signaler un problème). */
+    readonly diagnostic?: string,
+  ) {
     super(message);
   }
 }
@@ -158,8 +164,128 @@ export interface SessionEnt {
   nom: string;
 }
 
-export async function connexionEnt(email: string, motDePasse: string, adresses: AdressesEnt = ADRESSES_CESI): Promise<SessionEnt> {
-  if (!email || !motDePasse) throw new ErreurEnt('Adresse e-mail ou mot de passe manquant.', 'identifiants', true);
+interface Page {
+  url: string;
+  statut: number;
+  texte: string;
+}
+
+/** Description d'une page pour comprendre un échec, SANS valeur de champ (ni jeton, ni mot de passe). */
+export function diagnosticPage(page: Page): string {
+  const doc = parse(page.texte);
+  const u = new URL(page.url);
+  const court = (chemin: string) => chemin.replace(/[A-Za-z0-9_-]{25,}/g, '…');
+  const lignes = [
+    `Adresse : ${u.origin}${court(u.pathname)}${u.search ? ' (+ paramètres)' : ''} · statut ${page.statut}`,
+    `Titre : ${doc.querySelector('title')?.text.trim() || '(aucun)'}`,
+  ];
+  doc.querySelectorAll('form').forEach((f, i) => {
+    let action = f.getAttribute('action') ?? '';
+    try {
+      const a = new URL(action.replace(/&amp;/g, '&'), page.url);
+      action = `${a.origin}${court(a.pathname)}`;
+    } catch {
+      action = '(action illisible)';
+    }
+    const champs = f.querySelectorAll('input, select, textarea').map((c) => `${c.getAttribute('name') ?? '?'}${c.getAttribute('type') ? `:${c.getAttribute('type')}` : ''}`);
+    lignes.push(`Formulaire ${i + 1} (${f.getAttribute('id') || f.getAttribute('name') || 'sans nom'}) → ${action} · champs : ${champs.join(', ') || 'aucun'}`);
+  });
+  const liens = [...new Set(doc.querySelectorAll('a[href]').map((a) => a.getAttribute('href') ?? '').filter((h) => h.startsWith('/') || h.includes('cesi.fr')).map((h) => {
+    try {
+      return court(new URL(h, page.url).pathname);
+    } catch {
+      return '';
+    }
+  }).filter(Boolean))].slice(0, 15);
+  lignes.push(`Liens : ${liens.join(' · ') || 'aucun'}`);
+  const reperes = ['.sidebar-lien', '.session_libelle', '#compte', '[data-code-personne]', 'a[href*="emploi-du-temps"]', '#errorText', 'script'];
+  lignes.push(`Repères : ${reperes.map((r) => `${r}=${doc.querySelectorAll(r).length}`).join(' · ')}`);
+  const scripts = doc.querySelectorAll('script').map((x) => x.text).join(' ');
+  if (/location|submit\(/.test(scripts)) lignes.push('Scripts : redirection ou envoi automatique détecté');
+  lignes.push(`Texte : ${doc.text.replace(/\s+/g, ' ').trim().slice(0, 240)}`);
+  return lignes.join('\n');
+}
+
+/**
+ * Suit les pages qu'un navigateur traverserait tout seul (avec JavaScript) :
+ * formulaires envoyés automatiquement, <meta refresh>, redirection en JavaScript.
+ */
+async function suivrePagesAutomatiques(nav: Navigateur, page: Page): Promise<Page> {
+  for (let saut = 0; saut < 6; saut++) {
+    const doc = parse(page.texte);
+    // <meta http-equiv="refresh" content="0;url=...">
+    const meta = doc.querySelectorAll('meta').find((m) => /refresh/i.test(m.getAttribute('http-equiv') ?? ''));
+    const cibleMeta = meta?.getAttribute('content')?.match(/url\s*=\s*['"]?([^'";]+)/i)?.[1];
+    if (cibleMeta) {
+      page = await nav.requete(new URL(cibleMeta.replace(/&amp;/g, '&'), page.url).toString());
+      continue;
+    }
+    // Formulaire sans champ à remplir (tous cachés) : un navigateur l'envoie automatiquement
+    const auto = doc.querySelectorAll('form').find((f) => {
+      const champs = f.querySelectorAll('input');
+      const caches = champs.filter((c) => (c.getAttribute('type') ?? '').toLowerCase() === 'hidden');
+      const saisie = champs.some((c) => /^(text|password|email)$/i.test(c.getAttribute('type') ?? 'text') && (c.getAttribute('type') ?? '').toLowerCase() !== 'hidden');
+      const nomsConnus = caches.some((c) => /^(SAMLResponse|SAMLRequest|RelayState|ticket|wresult|wa|code|id_token|state)$/i.test(c.getAttribute('name') ?? ''));
+      return caches.length > 0 && !saisie && nomsConnus;
+    });
+    if (auto) {
+      const valeurs: Record<string, string> = {};
+      for (const c of auto.querySelectorAll('input')) {
+        const nom = c.getAttribute('name');
+        if (nom) valeurs[nom] = c.getAttribute('value') ?? '';
+      }
+      const action = new URL((auto.getAttribute('action') || page.url).replace(/&amp;/g, '&'), page.url).toString();
+      const post = (auto.getAttribute('method') ?? 'post').toLowerCase() !== 'get';
+      if (post) page = await nav.requete(action, { methode: 'POST', formulaire: valeurs });
+      else {
+        const u = new URL(action);
+        for (const [k, v] of Object.entries(valeurs)) u.searchParams.set(k, v);
+        page = await nav.requete(u.toString());
+      }
+      continue;
+    }
+    // window.location = "..." / location.href = '...' / location.replace("...")
+    const scripts = doc.querySelectorAll('script').map((x) => x.text).join('\n');
+    const cibleJs = scripts.match(/(?:window\.|document\.)?location(?:\.href)?\s*=\s*['"]([^'"]+)['"]|location\.replace\(\s*['"]([^'"]+)['"]\s*\)/);
+    const cible = cibleJs?.[1] ?? cibleJs?.[2];
+    if (cible && !/^javascript:/i.test(cible)) {
+      page = await nav.requete(new URL(cible, page.url).toString());
+      continue;
+    }
+    return page;
+  }
+  return page;
+}
+
+/** Session et adresse de la page « emploi du temps » trouvées sur une page de l'ENT. */
+function trouverSession(page: Page, adresses: AdressesEnt): { session: string; urlEdt: string; prenom: string; nom: string } | undefined {
+  const doc = parse(page.texte);
+  const nomAffiche = (doc.querySelector('#compte .plier-deplier__bouton .session_libelle') ?? doc.querySelector('.session_libelle'))?.text.trim().replace(/\s+/g, ' ') ?? '';
+  const [prenom = '', ...reste] = nomAffiche.split(' ');
+  const nom = reste.join(' ');
+  // 1. Un lien direct vers « /<session>/emploi-du-temps/<nom-prenom> »
+  for (const a of doc.querySelectorAll('a[href*="emploi-du-temps"]')) {
+    try {
+      const u = new URL(a.getAttribute('href')!, page.url);
+      const parties = u.pathname.split('/').filter(Boolean);
+      const i = parties.indexOf('emploi-du-temps');
+      if (i >= 1 && parties[i + 1]) return { session: parties[i - 1], urlEdt: new URL(u.pathname, adresses.ent).toString(), prenom, nom };
+    } catch {
+      // lien illisible : on essaie le suivant
+    }
+  }
+  // 2. Comme go-cesi : premier lien du menu (session) + nom affiché
+  const lien = doc.querySelector('.sidebar-lien')?.getAttribute('href');
+  if (lien && prenom && nom) {
+    const session = new URL(lien, page.url).pathname.replace(/^\/+/, '').split('/')[0];
+    if (session) return { session, urlEdt: `${adresses.ent}/${session}/emploi-du-temps/${identifiantEnt(prenom, nom)}`, prenom, nom };
+  }
+  return undefined;
+}
+
+type ChampRetour = 'SAMLResponse' | 'SAMLRequest';
+
+async function connexionVariante(email: string, motDePasse: string, adresses: AdressesEnt, champ: ChampRetour): Promise<SessionEnt> {
   const nav = new Navigateur(adresses);
 
   // 1. Page d'accueil de l'ENT (cookies de départ)
@@ -176,7 +302,7 @@ export async function connexionEnt(email: string, motDePasse: string, adresses: 
   const doc3 = parse(p3.texte);
   const options = doc3.querySelector('#options') ?? doc3.querySelector('form#loginForm') ?? doc3.querySelector('form');
   const action = options?.getAttribute('action');
-  if (!action) throw new ErreurEnt('Page de connexion inattendue (formulaire introuvable).', 'page de connexion');
+  if (!action) throw new ErreurEnt('Page de connexion inattendue (formulaire introuvable).', 'page de connexion', false, diagnosticPage(p3));
   const actionConnexion = new URL(action.replace(/&amp;/g, '&'), p3.url).toString();
   nav.verifierAdresse(actionConnexion); // jamais de mot de passe vers un autre serveur
 
@@ -192,27 +318,52 @@ export async function connexionEnt(email: string, motDePasse: string, adresses: 
         ? 'Le CESI demande une vérification supplémentaire (double authentification) : Forge ne peut pas la faire à ta place. Utilise un lien iCal à la place.'
         : 'Page inattendue après la connexion (le CESI a peut-être changé sa page).',
       'après connexion',
+      false,
+      diagnosticPage(p4),
     );
   }
   const reponse = formulaire(doc4, 'form[name="hiddenform"]', ['RelayState', 'SAMLResponse'], 'retour SAML', p4.url);
 
-  // 5. Retour à l'ENT avec l'assertion SAML
-  const p5 = await nav.requete(reponse.action, { methode: 'POST', formulaire: reponse.valeurs });
-  const doc5 = parse(p5.texte);
-  const lien = doc5.querySelector('.sidebar-lien')?.getAttribute('href');
-  const nomAffiche = doc5.querySelector('#compte .plier-deplier__bouton .session_libelle')?.text.trim().replace(/\s+/g, ' ');
-  if (!lien || !nomAffiche) throw new ErreurEnt("Connexion réussie mais page de l'ENT inattendue (session introuvable).", 'ENT');
-  const session = new URL(lien, p5.url).pathname.replace(/^\/+/, '').split('/')[0];
-  const [prenom, ...reste] = nomAffiche.split(' ');
-  const nom = reste.join(' ');
+  // 5. Retour à l'ENT avec l'assertion SAML, puis les pages qu'un navigateur traverserait tout seul
+  let p5: Page = await nav.requete(reponse.action, {
+    methode: 'POST',
+    formulaire: { RelayState: reponse.valeurs.RelayState, [champ]: reponse.valeurs.SAMLResponse },
+  });
+  p5 = await suivrePagesAutomatiques(nav, p5);
+  let infos = trouverSession(p5, adresses);
+  const diagnostics = [`Après le retour SAML (${champ}) :\n${diagnosticPage(p5)}`];
+  if (!infos) {
+    // Peut-être connecté mais arrivé ailleurs que sur l'accueil : on recharge l'accueil de l'ENT
+    const accueil = await suivrePagesAutomatiques(nav, await nav.requete(`${adresses.ent}/`));
+    infos = trouverSession(accueil, adresses);
+    if (!infos) diagnostics.push(`Accueil de l'ENT :\n${diagnosticPage(accueil)}`);
+  }
+  if (!infos) throw new ErreurEnt("Connexion réussie mais page de l'ENT inattendue (session introuvable).", 'ENT', false, diagnostics.join('\n\n'));
 
   // 6. Page « emploi du temps » : code personne
-  const p6 = await nav.requete(`${adresses.ent}/${session}/emploi-du-temps/${identifiantEnt(prenom, nom)}`);
+  const p6 = await suivrePagesAutomatiques(nav, await nav.requete(infos.urlEdt));
   const code = parse(p6.texte).querySelector('[data-code-personne]')?.getAttribute('data-code-personne');
   const codePersonne = Number(code);
-  if (!code || !Number.isInteger(codePersonne)) throw new ErreurEnt("Code personne introuvable sur la page d'emploi du temps.", 'emploi du temps');
+  if (!code || !Number.isInteger(codePersonne)) {
+    throw new ErreurEnt("Code personne introuvable sur la page d'emploi du temps.", 'emploi du temps', false, diagnosticPage(p6));
+  }
+  return { navigateur: nav, session: infos.session, codePersonne, prenom: infos.prenom, nom: infos.nom };
+}
 
-  return { navigateur: nav, session, codePersonne, prenom, nom };
+export async function connexionEnt(email: string, motDePasse: string, adresses: AdressesEnt = ADRESSES_CESI): Promise<SessionEnt> {
+  if (!email || !motDePasse) throw new ErreurEnt('Adresse e-mail ou mot de passe manquant.', 'identifiants', true);
+  try {
+    return await connexionVariante(email, motDePasse, adresses, 'SAMLResponse');
+  } catch (e) {
+    // go-cesi renvoie l'assertion sous le nom « SAMLRequest » : si le nom standard n'aboutit pas, on essaie le sien (une fois)
+    if (!(e instanceof ErreurEnt) || e.etape !== 'ENT') throw e;
+    try {
+      return await connexionVariante(email, motDePasse, adresses, 'SAMLRequest');
+    } catch (e2) {
+      const d2 = e2 instanceof ErreurEnt && e2.diagnostic ? `\n\n— Deuxième essai —\n${e2.diagnostic}` : '';
+      throw new ErreurEnt(e.message, e.etape, false, `${e.diagnostic ?? ''}${d2}`);
+    }
+  }
 }
 
 /** Séances entre deux dates (AAAA-MM-JJ). */

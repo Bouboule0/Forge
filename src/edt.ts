@@ -112,9 +112,16 @@ export class EmploiDuTemps implements vscode.Disposable {
     } catch (e) {
       this.erreur = e instanceof Error ? e.message : String(e);
       const etape = e instanceof ErreurEnt ? ` [étape : ${e.etape}]` : '';
+      const diagnostic = e instanceof ErreurEnt ? e.diagnostic : undefined;
       this.journal.appendLine(`[emploi du temps] ${this.erreur}${etape}`);
+      if (diagnostic) this.journal.appendLine(`[emploi du temps] diagnostic (aucun mot de passe ni jeton) :\n${diagnostic}`);
       if (manuel || (e instanceof ErreurEnt && e.identifiantsRefuses)) {
-        const choix = await vscode.window.showErrorMessage(`Emploi du temps : ${this.erreur}`, 'Reconfigurer', 'Voir le journal');
+        const boutons = diagnostic ? ['Copier le diagnostic', 'Reconfigurer', 'Voir le journal'] : ['Reconfigurer', 'Voir le journal'];
+        const choix = await vscode.window.showErrorMessage(`Emploi du temps : ${this.erreur}`, ...boutons);
+        if (choix === 'Copier le diagnostic' && diagnostic) {
+          await vscode.env.clipboard.writeText(`Forge — diagnostic emploi du temps${etape}\n${this.erreur}\n\n${diagnostic}`);
+          vscode.window.showInformationMessage('Diagnostic copié : colle-le dans ta conversation avec Claude (il ne contient ni mot de passe ni jeton).');
+        }
         if (choix === 'Reconfigurer') await this.configurer();
         if (choix === 'Voir le journal') this.journal.show(true);
       }
