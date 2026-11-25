@@ -26,6 +26,7 @@ Ces six phases sont les **phases principales** du projet : elles sont terminées
 |---|---|---|
 | A. Emploi du temps | Cours du jour dans la barre latérale (ENT CESI ou iCal), prochain cours dans la barre d'état | ✅ |
 | B. UML | Exercices de diagrammes de classes avec Mermaid | 💡 idée |
+| C. Révisions fantômes | Questions en gris dans l'éditeur, comme Copilot, selon le code et la maîtrise | ✅ |
 
 ---
 
@@ -270,6 +271,21 @@ Pour le configurer : **Forge : Configurer l'emploi du temps**, puis choisis la s
 
 **Forge : Déconnecter l'emploi du temps** efface les identifiants et le cache.
 
+## 👻 Révisions fantômes (annexe C)
+
+Pendant que tu codes en C/C++, une question peut apparaître **en gris en fin de ligne**, comme une suggestion de Copilot :
+
+```cpp
+    virtual void attaquer() const     🌱 Polymorphisme (« virtual ») : un mot manque dans ta définition  Tab · Échap
+```
+
+- **Quand ?** Quand tu écris un mot lié à une de tes notions (`virtual`, `override`, `template`, `class`, `private`, `operator`, `new`/`delete`, `unique_ptr`…), après une seconde et demie de pause ; ou au hasard après une pause d'environ 25 secondes.
+- **Quelle notion ?** Surtout les **fragiles** (à revoir, en retard, souvent ratées) ; les notions mûres 🍎 presque jamais.
+- **Tab** : une mini-question en haut de VS Code (mot manquant ou QCM), quelques secondes, puis tu reprends ton code. Ta réponse compte comme une révision : ta plante pousse, tu gagnes des pièces. **Échap** (ou continuer à taper) : elle disparaît.
+- **Jamais envahissant** : au plus une question toutes les 10 minutes, deux fois plus espacées si tu en ignores plusieurs d'affilée. Le texte gris n'est **jamais écrit dans ton fichier**, et Tab garde son rôle habituel quand une suggestion (Copilot, autocomplétion) est affichée.
+
+Réglages : `forge.fantomes.actif`, `forge.fantomes.intervalleMinutes` (10), `forge.fantomes.langages` (`cpp`, `c` ; `*` pour tous). Commandes : **Forge : Une révision fantôme maintenant**, **Forge : Activer / désactiver les révisions fantômes**.
+
 ## 🧭 Les commandes
 
 | Commande | Ce qu'elle fait |
@@ -283,6 +299,8 @@ Pour le configurer : **Forge : Configurer l'emploi du temps**, puis choisis la s
 | Forge : Emploi du temps | Ouvre la vue de la barre latérale |
 | Forge : Configurer l'emploi du temps | ENT CESI ou lien iCal |
 | Forge : Actualiser l'emploi du temps | Recharge les cours |
+| Forge : Une révision fantôme maintenant | Fait apparaître une question en gris tout de suite |
+| Forge : Activer / désactiver les révisions fantômes | Pour coder sans interruption |
 | Forge : Vérifier l'installation | Teste `wsl g++` (compile et lance « Hello Forge »), pandoc et git |
 | Forge : Créer / choisir le coffre Obsidian | Crée les dossiers et règle les couleurs du graphe |
 | Forge : Importer des CER / Prosits (.docx) | Lit tes Word et crée les notes, après l'écran de validation |

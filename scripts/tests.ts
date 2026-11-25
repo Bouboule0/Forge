@@ -137,7 +137,7 @@ test('export Word : tableau des mots-clés et validation des pistes', () => {
 
 import { ajouterJours, appliquerResultat, plafond, type EtatRevision } from '../src/core/repetition';
 import { corriger, genererQcmNotion, genererTrou, masquerNom, reponseCorrecte } from '../src/core/exercices';
-import { lireNotionsRevision, serieDeJours } from '../src/core/notionsRevision';
+import { lireHistorique, lireNotionsRevision, serieDeJours } from '../src/core/notionsRevision';
 import { aujourdhui } from '../src/core/texte';
 import { Seance } from '../src/core/seance';
 
@@ -1183,4 +1183,65 @@ test('chemins Windows ↔ WSL : le même coffre vu des deux côtés', async () =
   assert.equal(cheminLocal('/mnt/c/Users/moi/SecondCerveau', 'win32'), 'C:\\Users\\moi\\SecondCerveau');
   assert.equal(cheminLocal('/home/moi/coffre', 'linux'), '/home/moi/coffre');
   assert.equal(cheminLocal('D:\\Coffre', 'win32'), 'D:\\Coffre');
+});
+
+// --------------------------------------------------------------------------
+// Annexe C : révisions fantômes
+
+import { choisirNotion, enregistrerReponseRapide, motAvantCurseur, notionsPourMot, questionRapide, texteFantome } from '../src/core/fantomes';
+
+test('fantômes : le mot tapé évoque les bonnes notions', () => {
+  const coffre = coffreAvecNotions();
+  const notions = lireNotionsRevision(coffre);
+  assert.deepEqual(notionsPourMot('virtual', notions).map((n) => n.nom), ['Polymorphisme']);
+  assert.deepEqual(notionsPourMot('template', notions).map((n) => n.nom), ['Template']);
+  assert.deepEqual(notionsPourMot('private', notions).map((n) => n.nom), ['Encapsulation']);
+  assert.deepEqual(notionsPourMot('std::unique_ptr', notions).map((n) => n.nom), ['Pointeurs']);
+  assert.deepEqual(notionsPourMot('int', notions), []);
+  assert.equal(motAvantCurseur('    virtual '), 'virtual');
+  assert.equal(motAvantCurseur('    std::shared_ptr<'), 'shared_ptr');
+  assert.equal(motAvantCurseur('template<'), 'template');
+  assert.equal(motAvantCurseur('    int x = '), undefined);
+});
+
+test('fantômes : les notions fragiles sortent bien plus souvent, les mûres presque jamais', () => {
+  const n = (nom: string, niveau: number, prochaine: string, echecs = 0) =>
+    ({ nom, titre: nom, aliases: [], definitions: [{ prosit: null, texte: 'x' }], notesPerso: '', etat: { ...etat(niveau), prochaine, echecs } }) as any;
+  const fragile = n('Fragile', 1, '2026-11-20', 3);
+  const mure = n('Mûre', 6, '2027-03-01');
+  const moyenne = n('Moyenne', 3, '2026-12-10');
+  const compte: Record<string, number> = { Fragile: 0, Mûre: 0, Moyenne: 0 };
+  const h = hasardFixe(11);
+  for (let i = 0; i < 1000; i++) compte[choisirNotion([fragile, mure, moyenne], h, '2026-11-25')!.nom]++;
+  assert.ok(compte.Fragile > 800, JSON.stringify(compte));
+  assert.ok(compte.Mûre < 10, JSON.stringify(compte));
+  assert.equal(choisirNotion([{ ...mure, definitions: [], notesPerso: '' }]), undefined, 'sans définition, pas de question');
+});
+
+test('fantômes : texte gris court, qui ne donne jamais la réponse', () => {
+  const coffre = coffreAvecNotions();
+  const notions = lireNotionsRevision(coffre);
+  const poly = notions.find((x) => x.nom === 'Polymorphisme')!;
+  const h = hasardFixe(2);
+  for (let i = 0; i < 20; i++) {
+    const e = questionRapide(poly, notions, h)!;
+    assert.ok(['trou', 'qcm_notion', 'qcm_definition'].includes(e.type));
+    const texte = texteFantome(poly, e, 'virtual');
+    assert.ok(texte.length <= 100, texte);
+    assert.match(texte, /Tab · Échap$/);
+    if (e.type === 'qcm_notion') assert.ok(!/Polymorphisme/.test(texte), 'le nom de la notion est la réponse');
+  }
+});
+
+test('fantômes : la réponse compte comme une révision (ou un entraînement)', () => {
+  const coffre = coffreAvecNotions();
+  const notions = lireNotionsRevision(coffre);
+  const t = notions.find((x) => x.nom === 'Template')!;
+  const e = questionRapide(t, notions, hasardFixe())!;
+  const r1 = enregistrerReponseRapide(coffre, t, e, 'reussite', aujourdhui());
+  assert.deepEqual([r1.compte, r1.changement?.apres], [true, 1]);
+  assert.match(fs.readFileSync(t.chemin, 'utf8'), /niveau: 1/);
+  const r2 = enregistrerReponseRapide(coffre, t, e, 'reussite', aujourdhui());
+  assert.equal(r2.compte, false, 'déjà revue aujourd’hui : entraînement');
+  assert.equal(lireHistorique(coffre).length, 2);
 });

@@ -1,5 +1,11 @@
 # Journal des versions
 
+## 1.2.0 — Phase annexe C : révisions fantômes
+- Une question en **gris en fin de ligne**, comme une suggestion de Copilot, pendant que tu codes : déclenchée par un mot du code (`virtual` → Polymorphisme / Virtual Function Table, `template` → Template, `override` → Redéfinition, `private` → Encapsulation…) après une courte pause, ou au hasard après une pause plus longue.
+- **Tab** : mini-question en haut de VS Code (mot manquant ou QCM), qui compte comme une révision et fait pousser la plante ; **Échap** : ignorer. Le texte n'est jamais écrit dans le fichier.
+- Notions fragiles proposées bien plus souvent ; notions mûres presque jamais.
+- Au plus une question toutes les 10 minutes (deux fois plus espacé si tu en ignores plusieurs d'affilée), dans les fichiers C/C++ ; tout est réglable.
+
 ## 1.1.0 — Phase annexe A : emploi du temps
 - **Emploi du temps dans la barre latérale** (icône 🌱 Forge dans la barre d'activité) : cours du jour, navigation par jour et par semaine, cours en cours avec sa progression, salles et intervenants.
 - **Prochain cours dans la barre d'état** (« 14:00 Anglais · C105 », ou le cours en cours et son heure de fin).

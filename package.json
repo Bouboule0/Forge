@@ -2,7 +2,7 @@
   "name": "forge",
   "displayName": "Forge — Révision par l'action",
   "description": "Transforme tes Prosits et CER (CESI) en second cerveau Obsidian et t'aide à réviser en codant.",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "publisher": "bouboule0",
   "license": "MIT",
   "repository": {
@@ -153,6 +153,26 @@
         "command": "forge.edt.deconnecter",
         "title": "Déconnecter l'emploi du temps (effacer identifiants et cache)",
         "category": "Forge"
+      },
+      {
+        "command": "forge.fantomes.maintenant",
+        "title": "Une révision fantôme maintenant",
+        "category": "Forge"
+      },
+      {
+        "command": "forge.fantomes.basculer",
+        "title": "Activer / désactiver les révisions fantômes",
+        "category": "Forge"
+      },
+      {
+        "command": "forge.fantomes.repondre",
+        "title": "Répondre à la révision fantôme",
+        "category": "Forge"
+      },
+      {
+        "command": "forge.fantomes.ignorer",
+        "title": "Ignorer la révision fantôme",
+        "category": "Forge"
       }
     ],
     "menus": {
@@ -202,6 +222,16 @@
           "command": "forge.edt.configurer",
           "when": "view == forge.emploiDuTemps",
           "group": "navigation@2"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "forge.fantomes.repondre",
+          "when": "forge.fantomeVisible"
+        },
+        {
+          "command": "forge.fantomes.ignorer",
+          "when": "forge.fantomeVisible"
         }
       ]
     },
@@ -277,6 +307,29 @@
           "minimum": 1,
           "maximum": 48,
           "description": "Actualiser l'emploi du temps automatiquement toutes les N heures (l'ENT n'est jamais sollicité plus d'une fois toutes les 10 minutes)."
+        },
+        "forge.fantomes.actif": {
+          "type": "boolean",
+          "default": true,
+          "description": "Révisions fantômes : de petites questions en gris dans l'éditeur, comme une suggestion de Copilot (Tab pour répondre, Échap pour ignorer)."
+        },
+        "forge.fantomes.intervalleMinutes": {
+          "type": "number",
+          "default": 10,
+          "minimum": 1,
+          "maximum": 240,
+          "description": "Révisions fantômes : temps minimum entre deux questions (il double si tu en ignores plusieurs d'affilée)."
+        },
+        "forge.fantomes.langages": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "cpp",
+            "c"
+          ],
+          "markdownDescription": "Révisions fantômes : langages où elles peuvent apparaître (identifiants VS Code : `cpp`, `c`, `markdown`… ou `*` pour tous)."
         }
       }
     },
@@ -291,6 +344,16 @@
         "key": "ctrl+alt+v",
         "mac": "cmd+alt+v",
         "when": "editorTextFocus && resourceExtname =~ /\\.(cpp|hpp|h)$/"
+      },
+      {
+        "command": "forge.fantomes.repondre",
+        "key": "tab",
+        "when": "editorTextFocus && forge.fantomeVisible && !inlineSuggestionVisible && !suggestWidgetVisible && !inSnippetMode && !editorHasSelection"
+      },
+      {
+        "command": "forge.fantomes.ignorer",
+        "key": "escape",
+        "when": "editorTextFocus && forge.fantomeVisible && !suggestWidgetVisible"
       }
     ],
     "walkthroughs": [

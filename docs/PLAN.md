@@ -270,6 +270,7 @@ Les phases 0 à 6 ci-dessus sont les **phases principales** : le socle de Forge.
 |---|---|---|
 | A. Emploi du temps | Vue latérale (ENT CESI via le parcours de go-cesi, ou iCal), prochain cours dans la barre d'état, « Réviser ce module » | ✅ |
 | B. UML | Exercices de diagrammes de classes (Mermaid) | 💡 |
+| C. Révisions fantômes | Questions en gris dans l'éditeur (comme Copilot), déclenchées par le code et les pauses, selon la maîtrise | ✅ |
 
 ## 13. Points de vigilance
 - **Pas de corrigé officiel** : l'IA peut se tromper. Garde-fous : statut `à vérifier`, tests réels pour le code, bouton « Signaler une erreur », et un mode qui demande à DeepSeek ses sources.

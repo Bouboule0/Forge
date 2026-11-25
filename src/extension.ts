@@ -19,6 +19,7 @@ import { initialiserDiagnostics } from './verificationCode';
 import { EcranFerme } from './vues/ecranFerme';
 import { EcranStats } from './vues/ecranStats';
 import { EmploiDuTemps } from './edt';
+import { RevisionsFantomes } from './fantomes';
 import { VueEmploiDuTemps } from './vues/vueEmploiDuTemps';
 import { lancerCctl, mesExamens, nouvelExamen, preparerExamen, type OutilsExamens } from './examens';
 import { lireExamens } from './core/examens';
@@ -137,6 +138,23 @@ export function activate(context: vscode.ExtensionContext): void {
   commande('forge.edt.configurer', () => (edt ? edt.configurer() : sansEdt()));
   commande('forge.edt.actualiser', () => (edt ? edt.actualiser(true) : sansEdt()));
   commande('forge.edt.deconnecter', () => (edt ? edt.deconnecter() : sansEdt()));
+  // Révisions fantômes (phase annexe C) : questions en gris dans l'éditeur, comme une suggestion
+  const fantomes = new RevisionsFantomes(apresActivite);
+  context.subscriptions.push(fantomes);
+  commande('forge.fantomes.repondre', () => fantomes.repondre());
+  commande('forge.fantomes.ignorer', () => fantomes.ignorer());
+  commande('forge.fantomes.maintenant', () => {
+    const editeur = vscode.window.activeTextEditor;
+    if (!editeur) return vscode.window.showInformationMessage('Ouvre un fichier de code pour voir une révision fantôme.');
+    fantomes.effacer();
+    if (!fantomes.proposer(editeur, undefined, true)) vscode.window.showInformationMessage("Pas de révision disponible (coffre vide ou notions sans définition ?).");
+  });
+  commande('forge.fantomes.basculer', async () => {
+    const actif = !reglagesForge().get<boolean>('fantomes.actif', true);
+    await reglagesForge().update('fantomes.actif', actif, vscode.ConfigurationTarget.Global);
+    if (!actif) fantomes.effacer();
+    vscode.window.setStatusBarMessage(actif ? '🌱 Révisions fantômes activées' : '🌙 Révisions fantômes désactivées', 4000);
+  });
   commande('forge.priseEnMain', () => vscode.commands.executeCommand('workbench.action.openWalkthrough', 'bouboule0.forge#forge.priseEnMain', false));
   commande('forge.cctlBlanc', async () => {
     const coffre = await obtenirCoffre();
