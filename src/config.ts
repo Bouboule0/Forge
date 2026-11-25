@@ -6,6 +6,7 @@ import * as os from 'os';
 import * as vscode from 'vscode';
 import { estUnCoffre } from './core/coffre';
 import { initialiserCoffre } from './core/ecritureCoffre';
+import { cheminLocal } from './systeme';
 
 export function reglages() {
   return vscode.workspace.getConfiguration('forge');
@@ -22,7 +23,8 @@ export function commandePandoc(): string {
 }
 
 export function modeleWord(): string {
-  return reglages().get<string>('modeleWord', '').trim();
+  const chemin = reglages().get<string>('modeleWord', '').trim();
+  return chemin ? cheminLocal(chemin) : '';
 }
 
 export function moduleParDefaut(): string {
@@ -31,7 +33,8 @@ export function moduleParDefaut(): string {
 
 /** Coffre configuré et existant, sinon undefined. */
 export function coffreActuel(): string | undefined {
-  const chemin = reglages().get<string>('cheminCoffre', '').trim();
+  // Le réglage peut avoir été enregistré sous Windows (C:\…) ou dans WSL (/mnt/c/…)
+  const chemin = cheminLocal(reglages().get<string>('cheminCoffre', '').trim());
   return chemin && fs.existsSync(chemin) ? chemin : undefined;
 }
 

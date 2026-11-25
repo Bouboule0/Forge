@@ -1176,3 +1176,11 @@ test('navigation : une adresse de déconnexion est toujours refusée', async () 
   assert.equal(codePersonneDans({ url: 'https://x', statut: 200, texte: '<div data-code-personne="42"></div>' }), 42);
   assert.equal(codePersonneDans({ url: 'https://x', statut: 200, texte: '<p>rien</p>' }), null);
 });
+
+test('chemins Windows ↔ WSL : le même coffre vu des deux côtés', async () => {
+  const { cheminLocal } = await import('../src/systeme');
+  assert.equal(cheminLocal('C:\\Users\\moi\\SecondCerveau', 'linux'), '/mnt/c/Users/moi/SecondCerveau');
+  assert.equal(cheminLocal('/mnt/c/Users/moi/SecondCerveau', 'win32'), 'C:\\Users\\moi\\SecondCerveau');
+  assert.equal(cheminLocal('/home/moi/coffre', 'linux'), '/home/moi/coffre');
+  assert.equal(cheminLocal('D:\\Coffre', 'win32'), 'D:\\Coffre');
+});

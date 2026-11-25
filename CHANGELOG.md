@@ -6,6 +6,7 @@
 - Deux sources : **ENT CESI** (adresse @viacesi.fr + mot de passe, parcours de connexion adapté de go-cesi) ou **lien iCal (.ics)**.
 - Sécurité : mot de passe et lien dans le coffre-fort de VS Code, certificats HTTPS toujours vérifiés, identifiants envoyés uniquement aux serveurs cesi.fr / viacesi.fr ; cache local et au plus une connexion à l'ENT toutes les 10 minutes.
 - « 🌱 Réviser ce module » sur un cours : séance sur les Prosits du même module.
+- **WSL** : Forge tourne côté Windows même dans une fenêtre VS Code connectée à WSL ; installé dans WSL, il convertit le chemin du coffre (`C:\…` ↔ `/mnt/c/…`) et les liens vers Obsidian.
 
 ## 1.0.0 — Phase 6 : examens, statistiques, finitions (fin des phases principales)
 - **Mes examens** : date, type (CCTL, étude de cas) et Prosits au programme. Dans les 3 semaines qui précèdent, les notions au programme reviennent de plus en plus souvent ; compte à rebours dans la barre d'état.

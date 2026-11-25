@@ -107,6 +107,12 @@ Puis, dans VS Code : panneau Extensions → `…` → **Installer depuis un VSIX
 
 > Le `.vsix` est aussi fabriqué automatiquement par GitHub à chaque pull request (onglet **Actions** → **Vérification** → artefact `forge-vsix`).
 
+
+#### Et dans une fenêtre VS Code connectée à WSL ?
+
+Rien à faire : Forge **tourne côté Windows même dans une fenêtre WSL** (il est déclaré comme extension d'interface). Installe le `.vsix` une seule fois sous Windows ; il apparaît aussi dans tes fenêtres WSL, compile toujours avec `wsl g++` et garde le même coffre.
+
+Si tu préfères l'installer **dans WSL** (bouton « Installer dans WSL » du panneau Extensions, ou `code --install-extension forge-1.1.0.vsix` depuis un terminal WSL), ça marche aussi : le chemin du coffre (`C:\…` ↔ `/mnt/c/…`) est converti automatiquement, et Forge compile alors directement avec `g++`. Pour l'export Word, installe pandoc dans WSL (`sudo apt install pandoc`). Une seule installation suffit : pas les deux à la fois.
 ---
 
 ## 🔄 Synchroniser ton coffre entre tes ordinateurs (GitHub)

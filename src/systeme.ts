@@ -76,3 +76,39 @@ export function executerFichier(
     );
   });
 }
+
+// --------------------------------------------------------------------------
+// Chemins Windows ↔ WSL (le même coffre vu des deux côtés)
+
+let estWslCache: boolean | undefined;
+
+/** Forge tourne-t-il dans WSL (Linux sous Windows) ? */
+export function dansWsl(): boolean {
+  if (estWslCache === undefined) {
+    try {
+      estWslCache = process.platform === 'linux' && /microsoft|wsl/i.test(require('fs').readFileSync('/proc/version', 'utf8'));
+    } catch {
+      estWslCache = false;
+    }
+  }
+  return estWslCache;
+}
+
+/**
+ * Chemin utilisable par ce système, quel que soit le côté où il a été enregistré :
+ * « C:\Users\moi\Coffre » ↔ « /mnt/c/Users/moi/Coffre ».
+ */
+export function cheminLocal(chemin: string, plateforme: NodeJS.Platform = process.platform): string {
+  if (plateforme === 'win32') {
+    const m = chemin.match(/^\/mnt\/([a-z])(\/.*)?$/i);
+    return m ? `${m[1].toUpperCase()}:${(m[2] ?? '/').replace(/\//g, '\\')}` : chemin;
+  }
+  return /^[A-Za-z]:[\\/]/.test(chemin) ? versCheminWsl(chemin) : chemin;
+}
+
+/** Chemin à donner à une application Windows (Obsidian) quand Forge tourne dans WSL. */
+export function cheminPourWindows(chemin: string): string {
+  if (!dansWsl()) return chemin;
+  const m = chemin.match(/^\/mnt\/([a-z])(\/.*)?$/i);
+  return m ? `${m[1].toUpperCase()}:${(m[2] ?? '/').replace(/\//g, '\\')}` : chemin;
+}

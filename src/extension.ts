@@ -12,7 +12,7 @@ import { cheminDossier, DOSSIERS } from './core/coffre';
 import { afficherEcranImport } from './vues/ecranImport';
 import { afficherNotionsARevoir, BarreEtat } from './barreEtat';
 import { reglages as reglagesForge, choisirCoffre, coffreActuel, commandePandoc, compilateur, modeleWord, moduleParDefaut, obtenirCoffre } from './config';
-import { cheminPour, executer, passeParWsl } from './systeme';
+import { cheminPour, cheminPourWindows, executer, passeParWsl } from './systeme';
 import { lancerRevision, suggererRevision } from './revision';
 import { etudeDeCas, mesExercices, nouvelExercice, verifierCommande } from './code';
 import { initialiserDiagnostics } from './verificationCode';
@@ -298,7 +298,7 @@ async function importer(uri?: vscode.Uri, uris?: vscode.Uri[]): Promise<boolean>
   vscode.window.showInformationMessage(`🌱 Import terminé : ${morceaux.join(', ')}.`, 'Ouvrir dans Obsidian', 'Ouvrir le Prosit').then(async (choix) => {
     if (choix === 'Ouvrir le Prosit' && cheminPremier) await vscode.window.showTextDocument(vscode.Uri.file(cheminPremier));
     if (choix === 'Ouvrir dans Obsidian') {
-      await vscode.env.openExternal(vscode.Uri.parse(`obsidian://open?path=${encodeURIComponent(cheminPremier ?? coffre)}`));
+      await vscode.env.openExternal(vscode.Uri.parse(`obsidian://open?path=${encodeURIComponent(cheminPourWindows(cheminPremier ?? coffre))}`));
     }
   });
   return true;
